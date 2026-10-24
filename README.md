@@ -1,16 +1,12 @@
 # Claude Code Reviews
 
-The automated Claude Code review that runs on pull requests in Articore repositories, in the
-redbubble and teepublic organisations, as a GitHub Action.
+A GitHub Action that reviews pull requests in Articore repositories with Claude Code.
 
 This repository holds the logic: the action, its helper commands and the local runner. The review
 rules are in the private
 [redbubble/claude-code-reviews-rules](https://github.com/redbubble/claude-code-reviews-rules),
 and so are the architecture decision records for both repositories. The action is built for
 Articore's repositories, and won't work elsewhere: it needs our GitHub App, secrets and rules.
-
-For shared Claude Code skills, recommended MCP servers and brand-related configuration, see
-https://github.com/teepublic/claude-config instead.
 
 ## Usage
 
@@ -53,18 +49,20 @@ Then:
 3. Open a pull request. The review runs on that PR, so you can check the setup works before
    merging.
 
-Reviews run when a PR is opened, reopened, marked ready for review, or pushed to. A new push
-cancels a review still running on the previous one. Draft PRs aren't reviewed until they're
-marked ready.
+With this workflow, a review runs when a PR is opened, reopened, marked ready for review, or
+pushed to, and a new push cancels a review still running on the previous one. To change when it
+runs, see [Configuring the workflow](#configuring-the-workflow). Draft PRs aren't reviewed until
+they're marked ready.
+
+This relies on the one-time setup in [CI Bootstrapping](#ci-bootstrapping).
+
+### Pull requests that aren't reviewed
 
 Pull requests that only hold an architecture decision record aren't reviewed: they're discussed
 on the PR instead. A PR counts as one when its branch name starts with `adr-` and every file it
 changes, including a renamed file's old name, is under `docs/adr/`. Any other change from an
 `adr-` branch is reviewed as usual. A PR the review skips still passes the `claude-review` check,
 so a required check doesn't block it.
-
-This relies on the one-time setup in [CI Bootstrapping](#ci-bootstrapping), already done for the
-`redbubble` and `teepublic` organisations.
 
 ### A repository's own rules
 
@@ -92,9 +90,9 @@ precedence where the two conflict.
 - e.g. "`src/gen/` is generated from the OpenAPI spec."
 ```
 
-## Options
+## Configuring the workflow
 
-Each option is a change to the workflow in [Usage](#usage), made through a pull request like any
+Each of these is a change to the workflow in [Usage](#usage), made through a pull request like any
 other workflow change.
 
 ### Reviewing only when asked
