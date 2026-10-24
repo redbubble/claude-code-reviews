@@ -341,13 +341,13 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | `scripts/run-local.sh` | Runs a local review of the repository you're in. |
 | `scripts/review-in-docker.sh` | Runs inside the container: starts Claude on the review. |
 | `scripts/git-in-docker.sh` | `git` inside the container: refuses `--output`, so git can't write files. |
-| `.github/workflows/claude-code-review.yml` | Reviews this repository's own pull requests with the action they change. |
 
 ## Changing the action
 
-- Changes go through a pull request. This repository reviews its own pull requests with the
-  action as the pull request changes it, so a change is reviewed by the changed action. Pull
-  requests from forks get no secrets, so they aren't reviewed.
+- Changes go through a pull request, approved by a code owner. This repository isn't reviewed by
+  the action in CI: it's public, and the organisation secrets are only available to private
+  repositories. To have Claude review a change, run a [local review](#local-reviews) on its
+  branch.
 - Keep the action working with every rules version a repository may have pinned. Add helpers and
   inputs; don't remove or change them under rules that use them.
 - Claude can only run a new helper in `bin/` once it's in `--allowedTools` in `action.yml`. Check
