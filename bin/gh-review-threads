@@ -1,0 +1,194 @@
+#!/bin/sh
+# Review threads, summaries and labels on the pull request under review, without giving Claude
+# raw GraphQL or `gh pr edit`: either would let it change anything with the run's write-capable
+# GH_TOKEN.
+#
+# Usage:
+#   gh-review-threads list <pr-number>             every inline thread, with its comments, as JSON
+#   gh-review-threads resolve <thread-id>          resolve a Claude reviewer's thread, or hide its
+#                                                  first comment as resolved without contents: write
+#   gh-review-threads reply <thread-id> <body>     reply to a Claude reviewer's thread
+#   gh-review-threads hide-summaries <pr-number>   hide earlier Claude review summaries as outdated
+#   gh-review-threads labels <pr-number> [name...] set the PR's claude-review:* labels to exactly these
+#
+# resolve and reply only act on threads in this repository whose first comment is by a Claude
+# reviewer (github-actions[bot] or claude[bot]). hide-summaries only hides those reviewers'
+# finished summaries. labels only adds or removes labels named claude-review:<name>, from the
+# list in label_info.
+set -eu
+
+usage() {
+  echo "usage: gh-review-threads list <pr-number> | resolve <thread-id> | reply <thread-id> <body>" >&2
+  echo "       | hide-summaries <pr-number> | labels <pr-number> [name...]" >&2
+  exit 2
+}
+
+repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
+owner="${repo%%/*}"
+name="${repo#*/}"
+prefix="claude-review:"
+
+# Fails unless the thread is in this repository and was opened by a Claude reviewer. Sets
+# first_comment to the ID of the thread's first comment.
+check_thread() {
+  thread=$(gh api graphql -F id="$1" -f query='
+    query($id: ID!) {
+      node(id: $id) {
+        ... on PullRequestReviewThread {
+          pullRequest { repository { nameWithOwner } }
+          comments(first: 1) { nodes { id author { login } } }
+        }
+      }
+    }' --jq '.data.node | "\(.pullRequest.repository.nameWithOwner) \(.comments.nodes[0].author.login) \(.comments.nodes[0].id)"')
+  first_comment="${thread##* }"
+  case "$thread" in
+    "$repo github-actions "* | "$repo claude "*) ;;
+    *)
+      echo "gh-review-threads: $1 isn't a Claude reviewer's thread in $repo ($thread)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# Fails unless the argument is a PR number.
+check_pr() {
+  case "$1" in
+    '' | *[!0-9]*)
+      echo "gh-review-threads: $1 isn't a pull request number" >&2
+      exit 2
+      ;;
+  esac
+}
+
+# The labels a review may set: "<colour> <description>" for each name, failing for any other.
+label_info() {
+  case "$1" in
+    important) echo "b60205 Claude review: at least one open 🔴 Important finding" ;;
+    security) echo "d93f0b Claude review: open security, secrets, data or infrastructure exposure finding" ;;
+    rollback-risk) echo "d93f0b Claude review: open migration or rollback safety finding" ;;
+    needs-tests) echo "fbca04 Claude review: open finding about missing tests" ;;
+    performance) echo "fbca04 Claude review: open performance finding (e.g. N+1 queries)" ;;
+    cost) echo "fbca04 Claude review: open cost finding" ;;
+    rules-weakened) echo "b60205 Claude review: the PR weakens the review rules" ;;
+    *) return 1 ;;
+  esac
+}
+
+case "${1:-}" in
+  list)
+    [ $# -eq 2 ] || usage
+    check_pr "$2"
+    gh api graphql -F owner="$owner" -F name="$name" -F number="$2" -f query='
+      query($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100) {
+              nodes {
+                id isResolved isOutdated path line
+                resolvedBy { login }
+                comments(first: 50) { nodes { author { login } createdAt url isMinimized minimizedReason body } }
+              }
+            }
+          }
+        }
+      }' --jq '.data.repository.pullRequest.reviewThreads.nodes'
+    ;;
+  resolve)
+    [ $# -eq 2 ] || usage
+    check_thread "$2"
+    # Resolving needs contents: write, which the README makes opt-in. Without it, hide
+    # the thread's first comment as resolved instead; any other failure is reported as it is.
+    if ! result=$(gh api graphql -F id="$2" -f query='
+      mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }' \
+      --jq '.data.resolveReviewThread.thread' 2>&1); then
+      case "$result" in
+        *"Resource not accessible by integration"*) ;;
+        *)
+          echo "$result" >&2
+          exit 1
+          ;;
+      esac
+      gh api graphql -F id="$first_comment" -f query='
+        mutation($id: ID!) {
+          minimizeComment(input: { subjectId: $id, classifier: RESOLVED }) { minimizedComment { isMinimized } }
+        }' --silent
+      result="{\"id\":\"$2\",\"isResolved\":false,\"firstCommentHiddenAsResolved\":true}"
+    fi
+    echo "$result"
+    ;;
+  reply)
+    [ $# -eq 3 ] || usage
+    check_thread "$2"
+    gh api graphql -F id="$2" -f body="$3" -f query='
+      mutation($id: ID!, $body: String!) {
+        addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) {
+          comment { url }
+        }
+      }' --jq '.data.addPullRequestReviewThreadReply.comment'
+    ;;
+  hide-summaries)
+    [ $# -eq 2 ] || usage
+    check_pr "$2"
+    # A finished summary ends with its "Rules applied:" line, so this run's own summary, still in
+    # progress, is never hidden.
+    ids=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$2" -f query='
+      query($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) {
+            comments(last: 100) { nodes { id isMinimized author { login } body } }
+          }
+        }
+      }' --jq '.data.repository.pullRequest.comments.nodes[]
+        | select((.isMinimized | not)
+            and (.author.login == "github-actions" or .author.login == "claude")
+            and (.body | test("(^|\n)Rules applied: ")))
+        | .id')
+    count=0
+    for id in $ids; do
+      gh api graphql -F id="$id" -f query='
+        mutation($id: ID!) {
+          minimizeComment(input: { subjectId: $id, classifier: OUTDATED }) { minimizedComment { isMinimized } }
+        }' --silent
+      count=$((count + 1))
+    done
+    echo "Hid $count earlier summaries."
+    ;;
+  labels)
+    [ $# -ge 2 ] || usage
+    check_pr "$2"
+    pr="$2"
+    shift 2
+    for label in "$@"; do
+      label_info "$label" > /dev/null || {
+        echo "gh-review-threads: unknown label $label" >&2
+        exit 2
+      }
+    done
+    # Remove this review's labels that no longer apply. Labels without the prefix aren't ours.
+    current=$(gh api "repos/$repo/issues/$pr/labels" --paginate --jq '.[].name')
+    # One label per line: other labels' names can contain spaces.
+    IFS='
+'
+    for existing in $current; do
+      case "$existing" in "$prefix"*) ;; *) continue ;; esac
+      keep=no
+      for label in "$@"; do
+        [ "$existing" = "$prefix$label" ] && keep=yes
+      done
+      [ "$keep" = yes ] || gh api -X DELETE "repos/$repo/issues/$pr/labels/$existing" --silent
+    done
+    unset IFS
+    for label in "$@"; do
+      info=$(label_info "$label")
+      # The lookup's 404 is expected for a label this repository doesn't have yet. Any other
+      # failure shows up when the create below fails too.
+      if ! gh api "repos/$repo/labels/$prefix$label" --silent 2> /dev/null; then
+        gh api "repos/$repo/labels" -f name="$prefix$label" -f color="${info%% *}" \
+          -f description="${info#* }" --silent
+      fi
+      gh api "repos/$repo/issues/$pr/labels" -f "labels[]=$prefix$label" --silent
+    done
+    echo "Labels set: ${*:-none}"
+    ;;
+  *) usage ;;
+esac

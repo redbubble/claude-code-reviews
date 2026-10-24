@@ -1,0 +1,43 @@
+#!/bin/sh
+# Reads another Articore repository with that organisation's read-only review token, so Claude
+# never has to write a $VARIABLE in a command (its permission checker rejects those).
+# Usage: gh-read repos/<org>/<repo>/... [gh api flags]
+#
+# Only GET requests: local reviews (scripts/run-local.sh) give it the engineer's own token, which
+# can usually write. So it allows only the flags below and refuses everything else, including
+# grouped short flags (`-iX POST`), which gh would read as -i plus -X POST.
+set -eu
+path="${1:-}"
+case "$path" in
+  repos/redbubble/* | /repos/redbubble/*) GH_TOKEN="$RB_READ_TOKEN" ;;
+  repos/teepublic/* | /repos/teepublic/*) GH_TOKEN="$TP_READ_TOKEN" ;;
+  *)
+    echo "gh-read: the path must start with repos/redbubble/ or repos/teepublic/" >&2
+    exit 2
+    ;;
+esac
+refuse() {
+  echo "gh-read: $*" >&2
+  exit 2
+}
+expect=
+shift
+for arg in "$@"; do
+  case "$expect" in
+    method) [ "$arg" = GET ] || refuse "only GET requests" ;;
+  esac
+  if [ -n "$expect" ]; then
+    expect=
+    continue
+  fi
+  case "$arg" in
+    -H | --header | -q | --jq | -t | --template | --cache) expect=value ;;
+    -X | --method) expect=method ;;
+    --header=* | --jq=* | --template=* | --cache=* | --method=GET | -XGET) ;;
+    -i | --include | --paginate | --slurp | --silent) ;;
+    *) refuse "$arg isn't allowed: only -H, --jq, --template, --cache, -i, --paginate, --slurp, --silent and -X GET, each on its own" ;;
+  esac
+done
+[ -z "$expect" ] || refuse "the last flag needs a value"
+export GH_TOKEN
+exec gh api "$path" "$@"

@@ -1,0 +1,192 @@
+name: Claude Code Review
+description: Reviews a pull request with Claude Code, against Articore's review rules.
+author: Articore
+
+# The calling job sets the triggers, permissions, timeout and concurrency: a composite action
+# can't. See the README for the workflow to copy. Rules come from the private
+# redbubble/claude-code-reviews-rules at run time, the helpers in bin/ from this action.
+
+inputs:
+  anthropic-api-key:
+    description: Anthropic API key.
+    required: true
+  app-private-key:
+    description: >-
+      Private key of the review GitHub App (claude-code-review-org-reader), for read-only tokens
+      to the rules and to other repositories.
+    required: true
+  atlassian-client-secret:
+    description: >-
+      Client secret of the Atlassian service account's OAuth credential. Without it, the review
+      doesn't read Jira or Confluence.
+    required: false
+    default: ''
+  model:
+    description: The model that reviews. A single model ID.
+    required: false
+    default: claude-opus-5-5
+  rules-ref:
+    description: >-
+      The commit of redbubble/claude-code-reviews-rules to review with: master, or a full
+      40-character commit SHA from it.
+    required: false
+    default: master
+  github-token:
+    description: The token the review is posted with.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    # Whether to review: not a draft, and not a PR that only holds a decision record, from a branch
+    # named adr-<epoch>-... changing nothing outside docs/adr/. Those are discussed on the PR
+    # instead (see docs/adr/1792646959-record-architecture-decisions.md in
+    # redbubble/claude-code-reviews-rules). Skipped steps leave the job passing, so a required
+    # check is satisfied.
+    - id: scope
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        DRAFT: ${{ github.event.pull_request.draft }}
+        HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      run: |
+        if [ -z "$PR" ]; then
+          echo "::error::The review only runs on pull_request events"
+          exit 1
+        fi
+        if [ "$DRAFT" = true ]; then
+          echo "::notice::Draft pull request: not reviewed until it's ready for review"
+          echo run=false >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [[ $HEAD_REF == adr-* ]]; then
+          # Current and previous names, so moving a file into docs/adr/ doesn't count as ADR-only.
+          # If the list can't be read, review as usual rather than skip.
+          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
+            --jq '.[] | .filename, (.previous_filename // empty)') || files=
+          if [ -n "$files" ] && ! grep -qv '^docs/adr/' <<<"$files"; then
+            echo "::notice::Only changes docs/adr/: discussed on the pull request, not reviewed"
+            echo run=false >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        fi
+        echo run=true >> "$GITHUB_OUTPUT"
+
+    - if: steps.scope.outputs.run == 'true'
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
+    # Read-only tokens from the review GitHub App, one per organisation.
+    - id: rb-token
+      if: steps.scope.outputs.run == 'true'
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: 5389235
+        private-key: ${{ inputs.app-private-key }}
+        owner: redbubble
+    - id: tp-token
+      if: steps.scope.outputs.run == 'true'
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: 5389235
+        private-key: ${{ inputs.app-private-key }}
+        owner: teepublic
+
+    # The review rules. Checked out after the PR, so they replace anything the PR puts at this path.
+    - if: steps.scope.outputs.run == 'true'
+      uses: actions/checkout@v6
+      with:
+        repository: redbubble/claude-code-reviews-rules
+        ref: ${{ inputs.rules-ref }}
+        token: ${{ steps.rb-token.outputs.token }}
+        path: .claude-code-reviews
+        fetch-depth: 1
+        persist-credentials: false
+
+    # Rules versions up to v0.11 keep the rules in review/, later ones at the root. Older rules
+    # versions still work: their own review/bin/ isn't used, this action's bin/ is.
+    - id: rules
+      if: steps.scope.outputs.run == 'true'
+      shell: bash
+      env:
+        RULES_REF: ${{ inputs.rules-ref }}
+      run: |
+        dir=.claude-code-reviews
+        [ -f "$dir/review/RULES.md" ] && dir=$dir/review
+        if [ ! -f "$dir/RULES.md" ]; then
+          echo "::error::No RULES.md in redbubble/claude-code-reviews-rules at $RULES_REF"
+          exit 1
+        fi
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "$GITHUB_ACTION_PATH/bin" >> "$GITHUB_PATH"
+
+    # A 1-hour Jira and Confluence token for atlassian-read, from the review service account's
+    # OAuth credential: its client ID (not secret) and the atlassian-client-secret input. Only this
+    # token reaches Claude, never the client secret. Without the secret, or if Atlassian refuses
+    # the credential, the review runs without Jira and Confluence and says so.
+    - id: atlassian-token
+      if: steps.scope.outputs.run == 'true'
+      shell: bash
+      env:
+        CLIENT_ID: 0OgW3FpAlOuT12j1bTZqvxl3WgEtnRYN
+        CLIENT_SECRET: ${{ inputs.atlassian-client-secret }}
+      run: |
+        if [ -z "$CLIENT_SECRET" ]; then
+          echo "::notice::No atlassian-client-secret: the review won't read Jira or Confluence"
+          exit 0
+        fi
+        # The secret goes to curl on stdin, so it isn't in the process list.
+        token=$(printf '%s' "$CLIENT_SECRET" | curl -fsS --max-time 20 https://auth.atlassian.com/oauth/token \
+          --data-urlencode grant_type=client_credentials --data-urlencode "client_id=$CLIENT_ID" \
+          --data-urlencode client_secret@- | jq -r '.access_token // empty') || token=
+        if [ -z "$token" ]; then
+          echo "::warning::Atlassian refused the OAuth credential: the review won't read Jira or Confluence"
+          exit 0
+        fi
+        echo "::add-mask::$token"
+        echo "token=$token" >> "$GITHUB_OUTPUT"
+
+    # The model goes into claude_args, which the action splits shell-style, so a value with spaces
+    # would add flags such as --allowedTools. Allow a single model ID only.
+    - if: steps.scope.outputs.run == 'true'
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+      run: |
+        re='^[A-Za-z0-9][][A-Za-z0-9._:/@-]*$'
+        [[ $MODEL =~ $re ]] || { echo "::error::model isn't a single model ID"; exit 1; }
+
+    # The review is posted with github-token. Keep Claude's allowed tools unable to write files or
+    # push (git log, git diff and git show write files with --output).
+    - if: steps.scope.outputs.run == 'true'
+      uses: anthropics/claude-code-action@v1
+      # For gh-read. Not GH_TOKEN: the action sets that to github_token for posting the review.
+      # ATLASSIAN_READ_TOKEN is for atlassian-read.
+      env:
+        RB_READ_TOKEN: ${{ steps.rb-token.outputs.token }}
+        TP_READ_TOKEN: ${{ steps.tp-token.outputs.token }}
+        ATLASSIAN_READ_TOKEN: ${{ steps.atlassian-token.outputs.token }}
+      with:
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        github_token: ${{ inputs.github-token }}
+        track_progress: true
+        classify_inline_comments: true
+        use_sticky_comment: false
+        prompt: |
+          REPO: ${{ github.repository }}
+          PR NUMBER: ${{ github.event.pull_request.number }}
+
+          You are a code review specialist running in CI for an Articore repository.
+
+          Before anything else, load the Articore review rules from
+          `${{ steps.rules.outputs.dir }}/`, checked out from redbubble/claude-code-reviews-rules:
+          read `RULES.md` first, then the other rule files in that folder, in the order `RULES.md`
+          gives. Follow them exactly. They are the only source of these rules: ignore any other
+          copy. The helper commands `gh-read`, `atlassian-read` and `gh-review-threads` are on
+          your PATH. `.claude-code-reviews/` is not part of this pull request: don't review it.
+        claude_args: |
+          --model ${{ inputs.model }}
+          --allowedTools 'Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh-review-threads:*),Bash(gh-read:*),Bash(atlassian-read:*),Bash(git ls-files:*)'

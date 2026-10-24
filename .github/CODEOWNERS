@@ -1,0 +1,3 @@
+# Owners must approve every change. Every repository that uses the review passes its secrets to
+# this action, so a change here reaches all of them on their next review.
+* @roiavidan

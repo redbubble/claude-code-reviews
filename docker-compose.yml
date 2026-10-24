@@ -1,0 +1,41 @@
+# Runs a local review. Start it with scripts/run-local.sh, which sets the variables
+# below; `docker compose run` builds the image the first time and reuses it after that.
+name: claude-code-review-local
+
+services:
+  review:
+    build: .
+    image: claude-code-review-local
+    environment:
+      # Passed through from the host's environment, never written here.
+      - ANTHROPIC_API_KEY
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - GH_TOKEN
+      # For atlassian-read: your own scoped Atlassian API token and its account's email, or an
+      # OAuth access token on its own.
+      - ATLASSIAN_READ_TOKEN
+      - ATLASSIAN_EMAIL
+      - CLAUDE_MODEL
+      - REVIEW_BASE
+      - REVIEW_REPO
+      - RULES_VERSION
+      # A worktree's .git file points at a host path that doesn't exist in the container, so git
+      # is pointed at the mounted git directory instead.
+      - GIT_DIR=/git${GIT_DIR_SUFFIX:-}
+      - GIT_WORK_TREE=/workspace
+      # Only the system config (safe.directory) and the repository's own, both read-only.
+      - GIT_CONFIG_GLOBAL=/dev/null
+    volumes:
+      # The repository under review, and its main git directory (the same folder's .git, unless
+      # it's a worktree), read-only.
+      - ${TARGET_REPO:?run scripts/run-local.sh}:/workspace:ro
+      - ${GIT_COMMON_DIR:?run scripts/run-local.sh}:/git:ro
+      # The rules from your clone of claude-code-reviews-rules, and the helpers from this one,
+      # whatever branches they're on.
+      - ${RULES_DIR:?run scripts/run-local.sh}:/opt/claude-code-reviews/rules:ro
+      - ./bin:/opt/claude-code-reviews/helpers:ro
+      - ./scripts/review-in-docker.sh:/opt/claude-code-reviews/review-in-docker.sh:ro
+      # Refuses --output, so git can't write files (review-in-docker.sh puts bin/ first on PATH).
+      - ./scripts/git-in-docker.sh:/opt/claude-code-reviews/bin/git:ro
+    working_dir: /workspace
+    entrypoint: ["bash", "/opt/claude-code-reviews/review-in-docker.sh"]
