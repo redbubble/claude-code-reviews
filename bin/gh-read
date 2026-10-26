@@ -1,25 +1,50 @@
 #!/bin/sh
-# Reads another Articore repository with that organisation's read-only review token, so Claude
-# never has to write a $VARIABLE in a command (its permission checker rejects those).
-# Usage: gh-read repos/<org>/<repo>/... [gh api flags]
+# Reads another repository with a read-only review token, so Claude never has to write a
+# $VARIABLE in a command (its permission checker rejects those).
+# Usage: gh-read repos/<owner>/<repo>/... [gh api flags]
+#
+# redbubble and teepublic repositories are read with that organisation's token. Any other owner's
+# repository is read with the redbubble token, and only if it's public: upstream changelogs and
+# release notes, for example. Locally that token is the engineer's own, which may see private
+# repositories elsewhere, so gh-read checks the repository's visibility first.
 #
 # Only GET requests: local reviews (scripts/run-local.sh) give it the engineer's own token, which
 # can usually write. So it allows only the flags below and refuses everything else, including
 # grouped short flags (`-iX POST`), which gh would read as -i plus -X POST.
 set -eu
-path="${1:-}"
-case "$path" in
-  repos/redbubble/* | /repos/redbubble/*) GH_TOKEN="$RB_READ_TOKEN" ;;
-  repos/teepublic/* | /repos/teepublic/*) GH_TOKEN="$TP_READ_TOKEN" ;;
-  *)
-    echo "gh-read: the path must start with repos/redbubble/ or repos/teepublic/" >&2
-    exit 2
-    ;;
-esac
 refuse() {
   echo "gh-read: $*" >&2
   exit 2
 }
+path="${1:-}"
+# No `..` or percent-encoding, which could move the request out of the repository it names.
+case "$path" in
+  *..* | *%*) refuse "the path can't contain .. or %" ;;
+esac
+rest=${path#/}
+case "$rest" in
+  repos/*/*) ;;
+  *) refuse "the path must start with repos/<owner>/<repo>" ;;
+esac
+rest=${rest#repos/}
+owner=${rest%%/*}
+repo=${rest#*/}
+repo=${repo%%/*}
+repo=${repo%%\?*}
+name_ok() {
+  case "$1" in
+    '' | *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+}
+if ! name_ok "$owner" || ! name_ok "$repo"; then
+  refuse "the path must start with repos/<owner>/<repo>"
+fi
+case "$owner" in
+  redbubble) GH_TOKEN="$RB_READ_TOKEN" ;;
+  teepublic) GH_TOKEN="$TP_READ_TOKEN" ;;
+  *) GH_TOKEN="$RB_READ_TOKEN" public_only=yes ;;
+esac
+export GH_TOKEN
 expect=
 shift
 for arg in "$@"; do
@@ -39,5 +64,9 @@ for arg in "$@"; do
   esac
 done
 [ -z "$expect" ] || refuse "the last flag needs a value"
-export GH_TOKEN
+if [ "${public_only:-}" = yes ]; then
+  visibility=$(gh api "repos/$owner/$repo" --jq .visibility 2> /dev/null) || visibility=
+  [ "$visibility" = public ] ||
+    refuse "$owner/$repo isn't a public repository, or doesn't exist: outside redbubble and teepublic, only public repositories can be read"
+fi
 exec gh api "$path" "$@"

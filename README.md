@@ -198,7 +198,8 @@ On every pull request it reviews, the action:
    action's [`bin/`](bin/) on the `PATH`.
 3. **Runs `anthropics/claude-code-action`.** Claude reads `RULES.md` first, then the other rule
    files in the order `RULES.md` gives, and reviews the PR against them plus the repository's own
-   `REVIEW.md`. It reads other repositories in either organisation with
+   `REVIEW.md`. It reads other repositories in either organisation, and public repositories
+   anywhere on GitHub (upstream changelogs and release notes, say), with
    [`gh-read`](bin/gh-read) when the PR refers to them, the Jira issues and Confluence pages it
    refers to with [`atlassian-read`](bin/atlassian-read), and handles its earlier review threads
    with [`gh-review-threads`](bin/gh-review-threads).
@@ -290,6 +291,14 @@ command Claude runs contains a token or a variable. It only sends GET requests a
 the flags a read needs (`-H`, `--jq`, `--template`, `--cache`, `-i`, `--paginate`, `--slurp`,
 `--silent`, `-X GET`), because local reviews give it your own token.
 
+It also reads any other owner's repository, with the redbubble token, as long as it's public, so
+the review can read the upstream release notes of a dependency a PR bumps. It checks the
+repository's visibility first: in CI the app's token can't see private repositories outside the
+two organisations anyway, but locally your own token may. The review reads them this way rather
+than with `WebFetch`, so every request still goes only to `api.github.com`, where whoever owns
+the repository can't see what was asked. The path can't contain `..` or `%`, which could move a
+request out of the repository it names.
+
 ### Why `atlassian-read`
 
 The review reads the Jira issues and Confluence pages a PR refers to, so it can check the change
@@ -334,7 +343,7 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | Path | Purpose |
 | --- | --- |
 | `action.yml` | The action: decides whether to review, gets the tokens, checks out the rules and runs Claude. |
-| `bin/gh-read` | `gh api` for other repositories, with the right organisation's read-only token. |
+| `bin/gh-read` | `gh api` for other repositories, with the right organisation's read-only token, and for public repositories anywhere on GitHub. |
 | `bin/atlassian-read` | Reads one Jira issue or Confluence page, as text, with the review's read-only Atlassian token. |
 | `bin/gh-review-threads` | Lists the PR's review threads, and resolves or replies to Claude's own. Hides Claude's earlier summaries and sets the PR's `claude-review:*` labels. |
 | `Dockerfile`, `docker-compose.yml` | The container local reviews run in: tools only. |

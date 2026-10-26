@@ -5,8 +5,8 @@ set -euo pipefail
 
 rules=/opt/claude-code-reviews/rules
 
-# Locally, gh-read uses the engineer's own token for both organisations. gh-read refuses
-# anything but reads, since this token can usually write.
+# Locally, gh-read uses the engineer's own token for both organisations and for public
+# repositories elsewhere. gh-read refuses anything but reads, since this token can usually write.
 export RB_READ_TOKEN="${GH_TOKEN:-}" TP_READ_TOKEN="${GH_TOKEN:-}"
 export PATH="/opt/claude-code-reviews/bin:/opt/claude-code-reviews/helpers:$PATH"
 
