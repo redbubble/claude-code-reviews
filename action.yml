@@ -160,7 +160,9 @@ runs:
         [[ $MODEL =~ $re ]] || { echo "::error::model isn't a single model ID"; exit 1; }
 
     # The review is posted with github-token. Keep Claude's allowed tools unable to write files or
-    # push (git log, git diff and git show write files with --output).
+    # push (git log, git diff and git show write files with --output). track_progress puts the
+    # action in tag mode, which adds --permission-mode acceptEdits and git add, commit, rm and push
+    # tools ahead of claude_args: the --permission-mode and --disallowedTools below undo that.
     - if: steps.scope.outputs.run == 'true'
       uses: anthropics/claude-code-action@v1
       # For gh-read. Not GH_TOKEN: the action sets that to github_token for posting the review.
@@ -189,4 +191,6 @@ runs:
           your PATH. `.claude-code-reviews/` is not part of this pull request: don't review it.
         claude_args: |
           --model ${{ inputs.model }}
+          --permission-mode default
           --allowedTools 'Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh-review-threads:*),Bash(gh-read:*),Bash(atlassian-read:*),Bash(git ls-files:*)'
+          --disallowedTools 'Edit,MultiEdit,Write,NotebookEdit,Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(*git-push.sh:*)'

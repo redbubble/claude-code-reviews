@@ -483,6 +483,11 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   `git log`, `git diff` and `git show` write any file with `--output`, and a written
   `~/.gitconfig` makes the next git command run what it names. That's why CI doesn't allow them.
   `gh pr comment` isn't allowed either: its `--body-file` can post any readable file.
+- **Tag mode's write tools are switched off.** `track_progress` puts claude-code-action in tag
+  mode, which adds `--permission-mode acceptEdits` (file edits and commands such as `touch` and
+  `mv` in the workspace) and git add, commit, rm and push tools. `action.yml` passes
+  `--permission-mode default` after them, so the later flag wins, and denies those tools with
+  `--disallowedTools`.
 - **Claude can read the run's tokens and post them.** `Read` reaches its own process
   environment, and the inline-comment tool posts any text. The GitHub tokens in the job expire
   when it ends, so a leak of one through a prompt injection lasts for the rest of the job at
