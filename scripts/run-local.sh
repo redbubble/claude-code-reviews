@@ -12,6 +12,7 @@
 # Uses `gh auth token` to read pull requests and other repositories, if gh is logged in.
 # Reads Jira issues and Confluence pages with ATLASSIAN_READ_TOKEN (and ATLASSIAN_EMAIL), if set.
 # Reviews with the model in CLAUDE_REVIEW_MODEL, if set, else the same default as CI.
+# Reports at most CLAUDE_REVIEW_MAX_FINDINGS new findings, if set, else the rules' default.
 # Takes the rules from your clone of redbubble/claude-code-reviews-rules, whatever branch it's on:
 # CLAUDE_REVIEW_RULES if set, else claude-code-reviews-rules next to this repository's clone.
 set -euo pipefail
@@ -168,6 +169,12 @@ fi
 CLAUDE_MODEL=${CLAUDE_REVIEW_MODEL:-$(awk '/^  model:/ { m = 1 } m && /^    default:/ { print $2; exit }' "$here/../action.yml")}
 [ -n "$CLAUDE_MODEL" ] || die "couldn't read the default model from action.yml"
 
+# CLAUDE_REVIEW_MAX_FINDINGS if set, else the rules' default, as in CI without max-findings.
+MAX_FINDINGS=${CLAUDE_REVIEW_MAX_FINDINGS:-}
+if [ -n "$MAX_FINDINGS" ] && ! [[ $MAX_FINDINGS =~ ^[1-9][0-9]{0,2}$ ]]; then
+  die "CLAUDE_REVIEW_MAX_FINDINGS isn't a number from 1 to 999"
+fi
+
 # owner/name, from an ssh or https GitHub origin URL. Without one, the review can't name the
 # repository or find its pull request, but still runs. A missing origin is reported below.
 origin=$(git remote get-url origin 2> /dev/null || true)
@@ -194,7 +201,7 @@ if [ "$rules_branch" != master ]; then
   echo "run-local.sh: using the rules from claude-code-reviews-rules branch $rules_branch, not master" >&2
 fi
 
-export TARGET_REPO GIT_COMMON_DIR GIT_DIR_SUFFIX GH_TOKEN CLAUDE_MODEL REVIEW_REPO RULES_DIR RULES_VERSION
+export TARGET_REPO GIT_COMMON_DIR GIT_DIR_SUFFIX GH_TOKEN CLAUDE_MODEL MAX_FINDINGS REVIEW_REPO RULES_DIR RULES_VERSION
 export REVIEW_BASE="${1:-}"
 [ "$rebuild" = no ] || "${compose[@]}" build --pull
 

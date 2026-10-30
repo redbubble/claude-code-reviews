@@ -25,6 +25,13 @@ inputs:
     description: The model that reviews. A single model ID.
     required: false
     default: claude-opus-5-5
+  max-findings:
+    description: >-
+      The most new findings a review posts, of every severity, Important included. Without it,
+      the rules' default applies: 5, with every Important finding posted even past it. Rules
+      versions up to v0.14 ignore it.
+    required: false
+    default: ''
   rules-ref:
     description: >-
       The commit of redbubble/claude-code-reviews-rules to review with: master, or a full
@@ -150,14 +157,20 @@ runs:
         echo "token=$token" >> "$GITHUB_OUTPUT"
 
     # The model goes into claude_args, which the action splits shell-style, so a value with spaces
-    # would add flags such as --allowedTools. Allow a single model ID only.
+    # would add flags such as --allowedTools. Allow a single model ID only. max-findings goes into
+    # the prompt, so allow a number only.
     - if: steps.scope.outputs.run == 'true'
       shell: bash
       env:
         MODEL: ${{ inputs.model }}
+        MAX_FINDINGS: ${{ inputs.max-findings }}
       run: |
         re='^[A-Za-z0-9][][A-Za-z0-9._:/@-]*$'
         [[ $MODEL =~ $re ]] || { echo "::error::model isn't a single model ID"; exit 1; }
+        if [ -n "$MAX_FINDINGS" ] && ! [[ $MAX_FINDINGS =~ ^[1-9][0-9]{0,2}$ ]]; then
+          echo "::error::max-findings isn't a number from 1 to 999"
+          exit 1
+        fi
 
     # The review is posted with github-token. Keep Claude's allowed tools unable to write files or
     # push (git log, git diff and git show write files with --output). track_progress puts the
@@ -180,6 +193,7 @@ runs:
         prompt: |
           REPO: ${{ github.repository }}
           PR NUMBER: ${{ github.event.pull_request.number }}
+          MAX FINDINGS: ${{ inputs.max-findings || 'not set' }}
 
           You are a code review specialist running in CI for an Articore repository.
 

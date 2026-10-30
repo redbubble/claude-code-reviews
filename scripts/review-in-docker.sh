@@ -33,6 +33,7 @@ echo >&2
 prompt="REPO: ${REVIEW_REPO:-unknown}
 BRANCH: ${branch:-detached HEAD}
 BASE: $base (merge base $merge_base)
+MAX FINDINGS: ${MAX_FINDINGS:-not set}
 
 You are a code review specialist, reviewing an engineer's local changes in an Articore
 repository before they open a pull request.
