@@ -16,6 +16,7 @@ services:
       - ATLASSIAN_READ_TOKEN
       - ATLASSIAN_EMAIL
       - CLAUDE_MODEL
+      - MAX_FINDINGS
       - REVIEW_BASE
       - REVIEW_REPO
       - RULES_VERSION

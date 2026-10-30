@@ -129,8 +129,8 @@ case "${1:-}" in
   hide-summaries)
     [ $# -eq 2 ] || usage
     check_pr "$2"
-    # A finished summary ends with its "Rules applied:" line, so this run's own summary, still in
-    # progress, is never hidden.
+    # Only a finished summary has its "Rules applied:" line (the last line, or from rules v0.15 the
+    # last line of a collapsed block), so this run's own summary, still in progress, is never hidden.
     ids=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$2" -f query='
       query($owner: String!, $name: String!, $number: Int!) {
         repository(owner: $owner, name: $name) {

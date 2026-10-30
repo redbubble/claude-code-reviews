@@ -163,6 +163,23 @@ review fails unless it's a single model ID with no spaces or quotes. Otherwise i
 such as a wider `--allowedTools`. A model ID that doesn't exist also fails the review rather than
 falling back to the default.
 
+### Limiting the findings
+
+A review posts at most 5 new findings, of every severity together. Important findings come
+first and are always posted, even past the limit; the rest fill what's left, most impactful
+first. The summary says how many were left out. To set your own limit, add `max-findings`:
+
+```yaml
+        with:
+          # ...the inputs as in Usage
+          max-findings: 8
+```
+
+It must be a number from 1 to 999, and it's a hard limit: Important findings still come first,
+but no more than that are posted, even when that leaves some Important ones out. Rules versions
+up to v0.14 ignore it and cap Nits at 5 instead. For local reviews, set
+`CLAUDE_REVIEW_MAX_FINDINGS`.
+
 ### Resolving or minimising earlier findings
 
 When a later push fixes an issue the review raised, the review closes its thread. How it closes it
@@ -269,7 +286,8 @@ It runs the same review in a container, through `docker-compose.yml`:
   would let `git diff`, `log` or `show` write files. Git also ignores any global config, so a
   written one couldn't make it run a command anyway.
 - **It uses the same default model as CI**, read from [`action.yml`](action.yml), or the model in
-  `CLAUDE_REVIEW_MODEL` if you set it in your environment. Your own Claude Code settings,
+  `CLAUDE_REVIEW_MODEL` if you set it in your environment. It limits the findings as CI does
+  without `max-findings`, or to `CLAUDE_REVIEW_MAX_FINDINGS` if you set it. Your own Claude Code settings,
   `CLAUDE.md` and plugins aren't in the container, so they don't change the review.
 - **What it leaves out**: earlier review threads, hiding summaries and labels, which only apply
   to pull requests.
@@ -332,7 +350,7 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 
 - `hide-summaries` hides earlier Claude summaries as outdated, so only the latest one stays
   expanded. A summary is a comment by a Claude reviewer with a line starting `Rules applied: `,
-  which every summary ends with.
+  which every summary ends with (in a collapsed block from rules v0.15).
 - `labels` sets the PR's `claude-review:*` labels (`important`, `security`, `rollback-risk`,
   `needs-tests`, `performance`, `cost`, `rules-weakened`) to the ones that match its open
   findings, creating any the repository doesn't have yet. It never touches other labels. When
