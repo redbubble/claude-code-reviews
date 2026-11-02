@@ -51,10 +51,9 @@ runs:
     # instead (see docs/adr/1792646959-record-architecture-decisions.md in
     # redbubble/claude-code-reviews-rules). A draft is reviewed when the run comes from a label
     # being added: someone asked for it. Skipped steps leave the job passing, so a required check
-    # is satisfied, and a skip says why in one PR comment, updated rather than repeated and
-    # removed once a review runs. A public repository fails the job instead, before any token is
-    # made: the review reads private repositories, Jira and Confluence, and anyone could read what
-    # it posts there.
+    # is satisfied, and a skip says why in one PR comment, updated rather than repeated. A public
+    # repository fails the job instead, before any token is made: the review reads private
+    # repositories, Jira and Confluence, and anyone could read what it posts there.
     - id: scope
       shell: bash
       env:
@@ -76,7 +75,7 @@ runs:
 
         marker='<!-- claude-code-review-skipped -->'
         comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
-        # The comment is only a pointer: failing to post or remove it never fails the job.
+        # The comment is only a pointer: failing to post it never fails the job.
         skip_comment_id() {
           gh api "$comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1
         }
@@ -107,11 +106,6 @@ runs:
           fi
         fi
 
-        id=$(skip_comment_id) || id=
-        if [ -n "$id" ]; then
-          gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" > /dev/null ||
-            echo "::warning::Couldn't remove the earlier skip comment"
-        fi
         echo run=true >> "$GITHUB_OUTPUT"
 
     - if: steps.scope.outputs.run == 'true'
