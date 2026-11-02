@@ -50,17 +50,24 @@ runs:
     # named adr-<epoch>-... changing nothing outside docs/adr/. Those are discussed on the PR
     # instead (see docs/adr/1792646959-record-architecture-decisions.md in
     # redbubble/claude-code-reviews-rules). Skipped steps leave the job passing, so a required
-    # check is satisfied.
+    # check is satisfied. A public repository fails the job instead, before any token is made:
+    # the review reads private repositories, Jira and Confluence, and anyone could read what it
+    # posts there.
     - id: scope
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR: ${{ github.event.pull_request.number }}
+        PRIVATE: ${{ github.event.repository.private }}
         DRAFT: ${{ github.event.pull_request.draft }}
         HEAD_REF: ${{ github.event.pull_request.head.ref }}
       run: |
         if [ -z "$PR" ]; then
           echo "::error::The review only runs on pull_request events"
+          exit 1
+        fi
+        if [ "$PRIVATE" != true ]; then
+          echo "::error::The review only runs in private repositories: it reads private code, Jira and Confluence, and posts what it finds on the pull request"
           exit 1
         fi
         if [ "$DRAFT" = true ]; then

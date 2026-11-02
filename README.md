@@ -372,9 +372,10 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 ## Changing the action
 
 - Changes go through a pull request, approved by a code owner. This repository isn't reviewed by
-  the action in CI: it's public, and the organisation secrets are only available to private
-  repositories. To have Claude review a change, run a [local review](#local-reviews) on its
-  branch.
+  the action in CI: it's public, the organisation secrets are only available to private
+  repositories, and the action refuses to run in a public one (see
+  [Security notes](#security-notes)). To have Claude review a change, run a
+  [local review](#local-reviews) on its branch.
 - Keep the action working with every rules version a repository may have pinned. Add helpers and
   inputs; don't remove or change them under rules that use them.
 - Claude can only run a new helper in `bin/` once it's in `--allowedTools` in `action.yml`. Check
@@ -478,6 +479,10 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
 
 ## Security notes
 
+- **The review only runs in private repositories.** It reads private repositories in both
+  organisations, Jira and Confluence, and quotes what it finds in its comments, which anyone can
+  read on a public repository. So the action fails the job in a public repository before it
+  makes any token or starts Claude, even if the secrets have been made available there.
 - **Every repository passes its secrets to this action.** Anyone who can push to `master` here
   can read them in every repository that follows `master`. `master` is protected: every change
   needs a pull request approved by a code owner, with no bypass. A repository that needs more
