@@ -52,7 +52,8 @@ Then:
 With this workflow, a review runs when a PR is opened, reopened, marked ready for review, or
 pushed to, and a new push cancels a review still running on the previous one. To change when it
 runs, see [Configuring the workflow](#configuring-the-workflow). Draft PRs aren't reviewed until
-they're marked ready.
+they're marked ready, unless the run comes from a label being added (see
+[Reviewing only when asked](#reviewing-only-when-asked)).
 
 This relies on the one-time setup in [CI Bootstrapping](#ci-bootstrapping).
 
@@ -62,7 +63,9 @@ Pull requests that only hold an architecture decision record aren't reviewed: th
 on the PR instead. A PR counts as one when its branch name starts with `adr-` and every file it
 changes, including a renamed file's old name, is under `docs/adr/`. Any other change from an
 `adr-` branch is reviewed as usual. A PR the review skips still passes the `claude-review` check,
-so a required check doesn't block it.
+so a required check doesn't block it. So the pass isn't mistaken for a review, the skip also posts
+one comment on the PR saying why. Later skips update that comment rather than adding another, and
+it stays after a review runs, as a record of the skip.
 
 ### A repository's own rules
 
@@ -111,9 +114,9 @@ jobs:
     # ...the rest of the job as in Usage
 ```
 
-Add the `claude-review` label to a pull request to review it. To review a later push, remove the
-label and add it again. The `if:` matters: without it, adding any other label starts a job that
-cancels a review in progress.
+Add the `claude-review` label to a pull request to review it, draft or not. To review a later
+push, remove the label and add it again. The `if:` matters: without it, adding any other label
+starts a job that cancels a review in progress.
 
 ### Pinning the logic
 
