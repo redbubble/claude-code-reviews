@@ -76,11 +76,11 @@ runs:
 
         marker='<!-- claude-code-review-skipped -->'
         comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
-        # The comment is only a pointer: failing to post it never fails the job. Only a bot's
-        # comment counts, whichever token posted it, so a PR author can't post the marker and have
-        # it edited. sed rather than head, which would stop gh mid-page and fail the pipe.
+        # The comment is only a pointer: failing to post it never fails the job. Only a Claude
+        # reviewer's own comment counts, so a PR author can't post the marker and have it edited.
+        # sed rather than head, which would stop gh mid-page and fail the pipe.
         skip_comment_id() {
-          gh api "$comments" --paginate --jq ".[] | select(.user.type == \"Bot\") | select(.body | startswith(\"$marker\")) | .id" | sed -n 1p
+          gh api "$comments" --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" or .user.login == \"claude[bot]\") | select(.body | startswith(\"$marker\")) | .id" | sed -n 1p
         }
         skip_with_comment() {
           echo "::notice::$1"
