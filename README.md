@@ -65,7 +65,8 @@ changes, including a renamed file's old name, is under `docs/adr/`. Any other ch
 `adr-` branch is reviewed as usual. A PR the review skips still passes the `claude-review` check,
 so a required check doesn't block it. So the pass isn't mistaken for a review, the skip also posts
 one comment on the PR saying why. Later skips update that comment rather than adding another, and
-it stays after a review runs, as a record of the skip.
+it stays after a review runs, as a record of the skip. A skipped draft gets no comment: it's
+reviewed once it's marked ready.
 
 ### A repository's own rules
 

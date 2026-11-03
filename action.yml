@@ -51,9 +51,10 @@ runs:
     # instead (see docs/adr/1792646959-record-architecture-decisions.md in
     # redbubble/claude-code-reviews-rules). A draft is reviewed when the run comes from a label
     # being added: someone asked for it. Skipped steps leave the job passing, so a required check
-    # is satisfied, and a skip says why in one PR comment, updated rather than repeated. A public
-    # repository fails the job instead, before any token is made: the review reads private
-    # repositories, Jira and Confluence, and anyone could read what it posts there.
+    # is satisfied. A decision-record skip also says why in one PR comment, updated rather than
+    # repeated; a draft doesn't, as it's reviewed once it's ready. A public repository fails the
+    # job instead, before any token is made: the review reads private repositories, Jira and
+    # Confluence, and anyone could read what it posts there.
     - id: scope
       shell: bash
       env:
@@ -75,12 +76,13 @@ runs:
 
         marker='<!-- claude-code-review-skipped -->'
         comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
-        # The comment is only a pointer: failing to post it never fails the job. Only a Claude
-        # reviewer's own comment counts, so a PR author can't post the marker and have it edited.
+        # The comment is only a pointer: failing to post it never fails the job. Only a bot's
+        # comment counts, whichever token posted it, so a PR author can't post the marker and have
+        # it edited. sed rather than head, which would stop gh mid-page and fail the pipe.
         skip_comment_id() {
-          gh api "$comments" --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" or .user.login == \"claude[bot]\") | select(.body | startswith(\"$marker\")) | .id" | head -n 1
+          gh api "$comments" --paginate --jq ".[] | select(.user.type == \"Bot\") | select(.body | startswith(\"$marker\")) | .id" | sed -n 1p
         }
-        skip() {
+        skip_with_comment() {
           echo "::notice::$1"
           echo run=false >> "$GITHUB_OUTPUT"
           body="$marker
@@ -95,7 +97,9 @@ runs:
         }
 
         if [ "$DRAFT" = true ] && [ "$EVENT_ACTION" != labeled ]; then
-          skip "draft pull request. It's reviewed once it's marked ready, or when the review label is added."
+          echo "::notice::Draft pull request: reviewed once it's marked ready, or when the review label is added"
+          echo run=false >> "$GITHUB_OUTPUT"
+          exit 0
         fi
         if [[ $HEAD_REF == adr-* ]]; then
           # Current and previous names, so moving a file into docs/adr/ doesn't count as ADR-only.
@@ -103,7 +107,7 @@ runs:
           files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
             --jq '.[] | .filename, (.previous_filename // empty)') || files=
           if [ -n "$files" ] && ! grep -qv '^docs/adr/' <<<"$files"; then
-            skip "only changes docs/adr/. Decision records are discussed on the pull request, not reviewed."
+            skip_with_comment "only changes docs/adr/. Decision records are discussed on the pull request, not reviewed."
           fi
         fi
 
