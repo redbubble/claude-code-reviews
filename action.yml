@@ -244,11 +244,11 @@ runs:
 
     # What the review cost, for the people who run it. The review can't know its own cost while it
     # writes, so this runs after it: it reads the result record of the run's execution file and adds
-    # one line to the end of the review's own comment ("Claude finished ... task"), and to the job
-    # summary. The cost is the Claude Code CLI's estimate from token counts, close to the invoice
-    # but not it; the Anthropic Console has the real figure per API key. A turn is one round trip
-    # of the model: it reads or searches something, then decides what to do next. This never fails
-    # the job: without a record or a comment it only warns.
+    # one line to the end of this run's review comment, and to the job summary. The cost is the
+    # Claude Code CLI's estimate from token counts, close to the invoice but not it; the Anthropic
+    # Console has the real figure per API key. A turn is one round trip of the model: it reads or
+    # searches something, then decides what to do next. This never fails the job: without a record
+    # or a comment it only warns.
     - if: always() && steps.scope.outputs.run == 'true' && steps.review.outputs.execution_file != ''
       shell: bash
       env:
@@ -256,24 +256,39 @@ runs:
         PR: ${{ github.event.pull_request.number }}
         EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
       run: |
-        stats=$(jq -r '[.[] | select(.type == "result")] | last | select(. != null) | [.total_cost_usd, .num_turns] | @tsv' "$EXECUTION_FILE" 2> /dev/null) || stats=
+        # Numbers only, so the printf below can't fail the step.
+        stats=$(jq -r '[.[] | select(.type == "result")] | last | select(. != null)
+          | select((.total_cost_usd | type) == "number" and (.num_turns | type) == "number")
+          | [.total_cost_usd, .num_turns] | @tsv' "$EXECUTION_FILE" 2> /dev/null) || stats=
         if [ -z "$stats" ]; then
-          echo "::warning::No result record in the execution file, so no cost line"
+          echo "::warning::No cost in the execution file's result record, so no cost line"
           exit 0
         fi
         IFS=$'\t' read -r cost turns <<< "$stats"
         line=$(printf 'Review cost: about $%.2f (estimate) · %s turns' "$cost" "$turns")
         echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
-        comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
-        # The review's own comment from this run: the last one that starts with its header.
-        found=$(gh api "$comments" --paginate --jq '[.[] | select(.user.login == "github-actions[bot]" or .user.login == "claude[bot]") | select(.body | startswith("**Claude finished"))] | last | select(. != null) | [.id, (.body | contains("Review cost:"))] | @tsv') || found=
-        IFS=$'\t' read -r id has_cost <<< "$found"
-        if [ -z "$id" ] || [ "$has_cost" = true ]; then
-          echo "::notice::No review comment to add the cost line to"
+        # This run's review comment: claude-code-action's "View job" link in it points at this run,
+        # whatever its header says (finished or error). A re-run keeps the run ID, so take the
+        # newest. --slurp so that `last` sees every page, not each page on its own. The marker,
+        # not the line's text, says the line is already there: a review can quote "Review cost:".
+        marker='<!-- claude-code-review-cost -->'
+        run_link="($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+        found=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" --paginate --slurp \
+          | jq -c --arg link "$run_link" 'add
+              | map(select(.user.login == "github-actions[bot]" or .user.login == "claude[bot]")
+                | select(.body | contains($link)))
+              | last | select(. != null) | {id, body}') || found=
+        if [ -z "$found" ]; then
+          echo "::notice::No review comment from this run to add the cost line to"
           exit 0
         fi
-        body=$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body) || exit 0
-        printf '%s\n\n<sub>%s</sub>' "$body" "$line" > "$RUNNER_TEMP/review-comment.md"
+        id=$(jq -r .id <<< "$found")
+        body=$(jq -r .body <<< "$found")
+        if [[ "$body" == *"$marker"* ]]; then
+          echo "::notice::The review comment already has a cost line"
+          exit 0
+        fi
+        printf '%s\n\n%s\n<sub>%s</sub>' "$body" "$marker" "$line" > "$RUNNER_TEMP/review-comment.md"
         gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/review-comment.md" > /dev/null \
           || echo "::warning::Couldn't add the cost line to the review comment"
