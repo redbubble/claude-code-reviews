@@ -60,4 +60,4 @@ with these changes for a local review:
 exec claude -p "$prompt" \
   --model "$CLAUDE_MODEL" \
   --add-dir /opt/claude-code-reviews \
-  --allowedTools 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git ls-files:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh-read:*),Bash(atlassian-read:*)'
+  --allowedTools 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git ls-files:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh-read:*),Bash(atlassian-read:*)'
