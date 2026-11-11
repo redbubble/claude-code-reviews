@@ -249,7 +249,7 @@ runs:
     # Console has the real figure per API key. A turn is one round trip of the model: it reads or
     # searches something, then decides what to do next. This never fails the job: without a record
     # or a comment it only warns.
-    - if: always() && steps.scope.outputs.run == 'true' && steps.review.outputs.execution_file != ''
+    - if: always() && steps.scope.outputs.run == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -261,7 +261,7 @@ runs:
           | select((.total_cost_usd | type) == "number" and (.num_turns | type) == "number")
           | [.total_cost_usd, .num_turns] | @tsv' "$EXECUTION_FILE" 2> /dev/null) || stats=
         if [ -z "$stats" ]; then
-          echo "::warning::No cost in the execution file's result record, so no cost line"
+          echo "::warning::No execution file, or no cost in its result record, so no cost line"
           exit 0
         fi
         IFS=$'\t' read -r cost turns <<< "$stats"
