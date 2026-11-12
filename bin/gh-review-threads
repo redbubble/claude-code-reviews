@@ -39,8 +39,18 @@ prefix="claude-review:"
 
 # Fails unless the thread is on the pull request under review and was opened by a Claude reviewer.
 # Sets first_comment to the ID of the thread's first comment.
+#
+# The ID must look like a GraphQL node ID (PRRT_kwDO...), and every value here goes to gh as -f, a
+# plain string: with -F, gh reads a value starting with @ as a file, so `resolve @/proc/self/environ`
+# would send the environment to GitHub and print it back in the error.
 check_thread() {
-  thread=$(gh api graphql -F id="$1" -f query='
+  case "$1" in
+    '' | *[!A-Za-z0-9_=-]*)
+      echo "gh-review-threads: $1 isn't a review thread ID" >&2
+      exit 2
+      ;;
+  esac
+  thread=$(gh api graphql -f id="$1" -f query='
     query($id: ID!) {
       node(id: $id) {
         ... on PullRequestReviewThread {
@@ -85,7 +95,7 @@ case "${1:-}" in
   list)
     [ $# -eq 2 ] || usage
     check_pr "$2"
-    gh api graphql -F owner="$owner" -F name="$name" -F number="$2" -f query='
+    gh api graphql -f owner="$owner" -f name="$name" -F number="$2" -f query='
       query($owner: String!, $name: String!, $number: Int!) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
@@ -105,7 +115,7 @@ case "${1:-}" in
     check_thread "$2"
     # Resolving needs contents: write, which the README makes opt-in. Without it, hide
     # the thread's first comment as resolved instead; any other failure is reported as it is.
-    if ! result=$(gh api graphql -F id="$2" -f query='
+    if ! result=$(gh api graphql -f id="$2" -f query='
       mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }' \
       --jq '.data.resolveReviewThread.thread' 2>&1); then
       case "$result" in
@@ -115,7 +125,7 @@ case "${1:-}" in
           exit 1
           ;;
       esac
-      gh api graphql -F id="$first_comment" -f query='
+      gh api graphql -f id="$first_comment" -f query='
         mutation($id: ID!) {
           minimizeComment(input: { subjectId: $id, classifier: RESOLVED }) { minimizedComment { isMinimized } }
         }' --silent
@@ -126,7 +136,7 @@ case "${1:-}" in
   reply)
     [ $# -eq 3 ] || usage
     check_thread "$2"
-    gh api graphql -F id="$2" -f body="$3" -f query='
+    gh api graphql -f id="$2" -f body="$3" -f query='
       mutation($id: ID!, $body: String!) {
         addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) {
           comment { url }
@@ -138,7 +148,7 @@ case "${1:-}" in
     check_pr "$2"
     # Only a finished summary has its "Rules applied:" line (the last line, or from rules v0.15 the
     # last line of a collapsed block), so this run's own summary, still in progress, is never hidden.
-    ids=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$2" -f query='
+    ids=$(gh api graphql -f owner="$owner" -f name="$name" -F number="$2" -f query='
       query($owner: String!, $name: String!, $number: Int!) {
         repository(owner: $owner, name: $name) {
           pullRequest(number: $number) {
@@ -152,7 +162,7 @@ case "${1:-}" in
         | .id')
     count=0
     for id in $ids; do
-      gh api graphql -F id="$id" -f query='
+      gh api graphql -f id="$id" -f query='
         mutation($id: ID!) {
           minimizeComment(input: { subjectId: $id, classifier: OUTDATED }) { minimizedComment { isMinimized } }
         }' --silent
