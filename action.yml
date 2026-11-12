@@ -124,19 +124,20 @@ runs:
       with:
         fetch-depth: 1
 
-    # Read-only tokens from the review GitHub App, one per organisation.
+    # Read-only tokens from the review GitHub App, one per organisation. The app is identified by its
+    # client ID (not secret), which create-github-app-token prefers to the deprecated app ID.
     - id: rb-token
       if: steps.scope.outputs.run == 'true'
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
-        app-id: 5389235
+        client-id: Iv23lituGw4b66z7qu3p
         private-key: ${{ inputs.app-private-key }}
         owner: redbubble
     - id: tp-token
       if: steps.scope.outputs.run == 'true'
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
-        app-id: 5389235
+        client-id: Iv23lituGw4b66z7qu3p
         private-key: ${{ inputs.app-private-key }}
         owner: teepublic
 
