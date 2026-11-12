@@ -11,8 +11,10 @@
 #   gh-review-threads hide-summaries <pr-number>   hide earlier Claude review summaries as outdated
 #   gh-review-threads labels <pr-number> [name...] set the PR's claude-review:* labels to exactly these
 #
-# resolve and reply only act on threads in this repository whose first comment is by a Claude
-# reviewer (github-actions[bot] or claude[bot]). hide-summaries only hides those reviewers'
+# Every command only acts on the pull request under review: REVIEW_PR, which action.yml sets from
+# the run's event, so Claude can't choose another. A <pr-number> argument must match it, and
+# resolve and reply only act on threads on it whose first comment is by a Claude reviewer
+# (github-actions[bot] or claude[bot]). hide-summaries only hides those reviewers'
 # finished summaries. labels only adds or removes labels named claude-review:<name>, from the
 # list in label_info.
 set -eu
@@ -24,40 +26,45 @@ usage() {
 }
 
 repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
+review_pr="${REVIEW_PR:-}"
+case "$review_pr" in
+  '' | *[!0-9]*)
+    echo "gh-review-threads: REVIEW_PR isn't set to the pull request under review" >&2
+    exit 2
+    ;;
+esac
 owner="${repo%%/*}"
 name="${repo#*/}"
 prefix="claude-review:"
 
-# Fails unless the thread is in this repository and was opened by a Claude reviewer. Sets
-# first_comment to the ID of the thread's first comment.
+# Fails unless the thread is on the pull request under review and was opened by a Claude reviewer.
+# Sets first_comment to the ID of the thread's first comment.
 check_thread() {
   thread=$(gh api graphql -F id="$1" -f query='
     query($id: ID!) {
       node(id: $id) {
         ... on PullRequestReviewThread {
-          pullRequest { repository { nameWithOwner } }
+          pullRequest { number repository { nameWithOwner } }
           comments(first: 1) { nodes { id author { login } } }
         }
       }
-    }' --jq '.data.node | "\(.pullRequest.repository.nameWithOwner) \(.comments.nodes[0].author.login) \(.comments.nodes[0].id)"')
+    }' --jq '.data.node | "\(.pullRequest.repository.nameWithOwner)#\(.pullRequest.number) \(.comments.nodes[0].author.login) \(.comments.nodes[0].id)"')
   first_comment="${thread##* }"
   case "$thread" in
-    "$repo github-actions "* | "$repo claude "*) ;;
+    "$repo#$review_pr github-actions "* | "$repo#$review_pr claude "*) ;;
     *)
-      echo "gh-review-threads: $1 isn't a Claude reviewer's thread in $repo ($thread)" >&2
+      echo "gh-review-threads: $1 isn't a Claude reviewer's thread on $repo#$review_pr ($thread)" >&2
       exit 1
       ;;
   esac
 }
 
-# Fails unless the argument is a PR number.
+# Fails unless the argument is the number of the pull request under review.
 check_pr() {
-  case "$1" in
-    '' | *[!0-9]*)
-      echo "gh-review-threads: $1 isn't a pull request number" >&2
-      exit 2
-      ;;
-  esac
+  if [ "$1" != "$review_pr" ]; then
+    echo "gh-review-threads: $1 isn't the pull request under review (#$review_pr)" >&2
+    exit 2
+  fi
 }
 
 # The labels a review may set: "<colour> <description>" for each name, failing for any other.
