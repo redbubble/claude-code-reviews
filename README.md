@@ -449,7 +449,7 @@ The table below is how it's configured, for reference or if it ever needs recrea
 
 After creating it:
 
-1. Copy the **App ID** from its settings page into both `app-id:` lines of
+1. Copy the **Client ID** from its settings page into both `client-id:` lines of
    [`action.yml`](action.yml). The ID isn't secret.
 2. Under *Private keys*, **generate a private key**. This downloads a `.pem` file: you'll store it
    as a secret in step 3, then delete the local file.
