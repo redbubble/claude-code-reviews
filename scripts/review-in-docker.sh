@@ -57,7 +57,15 @@ with these changes for a local review:
   couldn't read under \"Not assessed\". The same goes for Jira and Confluence with
   \`atlassian-read\`."
 
+# The repository under review is untrusted: --restricted ignores its .claude/ settings (hooks,
+# permission rules, env, helper commands) and keeps Read, Glob and Grep inside /workspace and the
+# rules, away from /proc and the tokens in its process environments. --strict-mcp-config ignores
+# its .mcp.json. --restricted removes Bash unless --tools names it, and --allowedTools limits it
+# to the commands below.
 exec claude -p "$prompt" \
   --model "$CLAUDE_MODEL" \
+  --restricted \
+  --strict-mcp-config \
+  --tools 'Read,Glob,Grep,Bash' \
   --add-dir /opt/claude-code-reviews \
   --allowedTools 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git ls-files:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh-read:*),Bash(atlassian-read:*)'

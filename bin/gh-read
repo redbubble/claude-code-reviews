@@ -11,6 +11,13 @@
 # Only GET requests: local reviews (scripts/run-local.sh) give it the engineer's own token, which
 # can usually write. So it allows only the flags below and refuses everything else, including
 # grouped short flags (`-iX POST`), which gh would read as -i plus -X POST.
+#
+# Nothing a read could signal through: a review only needs metadata, file contents, diffs and
+# release notes. Outside redbubble and teepublic, it refuses release-asset downloads, whose public
+# download counts would let an injected prompt send data to whoever owns the repository, one asset
+# at a time. -H only sets an Accept header for a GitHub JSON, raw, diff or patch response, so no
+# request can ask for a binary download. A --jq program can't read the environment (`env`,
+# `$ENV`), where the review's tokens and API key are.
 set -eu
 refuse() {
   echo "gh-read: $*" >&2
@@ -45,20 +52,44 @@ case "$owner" in
   *) GH_TOKEN="$RB_READ_TOKEN" public_only=yes ;;
 esac
 export GH_TOKEN
+if [ "${public_only:-}" = yes ]; then
+  # Lower case and single slashes, so no spelling of the path gets past the check.
+  normalized=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]' | tr -s /)
+  case "$normalized" in
+    */releases/assets | */releases/assets/* | */releases/assets\?*)
+      refuse "release assets can't be downloaded outside redbubble and teepublic: read the release itself (releases/tags/<tag>) for its notes"
+      ;;
+  esac
+fi
+check_header() {
+  printf '%s' "$1" | grep -Eiq '^accept:[[:space:]]*application/(json|vnd\.github(\.v3)?(\.(raw|diff|patch|text|html|full))?(\+json)?)[[:space:]]*$' ||
+    refuse "-H only takes an Accept header for a GitHub JSON, raw, diff or patch response, such as 'Accept: application/vnd.github.raw'"
+}
+check_jq() {
+  if printf '%s' "$1" | grep -Eq '(^|[^A-Za-z0-9_])(env|ENV)($|[^A-Za-z0-9_])'; then
+    refuse "a --jq program can't read the environment"
+  fi
+}
 expect=
 shift
 for arg in "$@"; do
   case "$expect" in
     method) [ "$arg" = GET ] || refuse "only GET requests" ;;
+    header) check_header "$arg" ;;
+    jq) check_jq "$arg" ;;
   esac
   if [ -n "$expect" ]; then
     expect=
     continue
   fi
   case "$arg" in
-    -H | --header | -q | --jq | -t | --template | --cache) expect=value ;;
+    -H | --header) expect=header ;;
+    -q | --jq) expect=jq ;;
+    -t | --template | --cache) expect=value ;;
     -X | --method) expect=method ;;
-    --header=* | --jq=* | --template=* | --cache=* | --method=GET | -XGET) ;;
+    --header=*) check_header "${arg#--header=}" ;;
+    --jq=*) check_jq "${arg#--jq=}" ;;
+    --template=* | --cache=* | --method=GET | -XGET) ;;
     -i | --include | --paginate | --slurp | --silent) ;;
     *) refuse "$arg isn't allowed: only -H, --jq, --template, --cache, -i, --paginate, --slurp, --silent and -X GET, each on its own" ;;
   esac

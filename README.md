@@ -289,6 +289,13 @@ It runs the same review in a container, through `docker-compose.yml`:
   GET requests, and `git` in the container (`scripts/git-in-docker.sh`) refuses `--output`, which
   would let `git diff`, `log` or `show` write files. Git also ignores any global config, so a
   written one couldn't make it run a command anyway.
+- **Nothing in the repository under review configures Claude.** A branch is untrusted, so Claude
+  runs with `--restricted`, which ignores the repository's `.claude/` settings (hooks, permission
+  rules, environment, helper commands), and `--strict-mcp-config`, which ignores its `.mcp.json`.
+- **Claude can't read your tokens.** They're in its environment, under `/proc`. `--restricted`
+  keeps `Read`, `Glob` and `Grep` inside the repository and the rules, symlinks included, and
+  `git` refuses `--no-index` and paths outside the repository, which would let `git diff` print
+  any file. `gh` and `gh-read` refuse a `--jq` program that reads the environment.
 - **It uses the same default model as CI**, read from [`action.yml`](action.yml), or the model in
   `CLAUDE_REVIEW_MODEL` if you set it in your environment. It limits the findings as CI does
   without `max-findings`, or to `CLAUDE_REVIEW_MAX_FINDINGS` if you set it. Your own Claude Code settings,
@@ -311,7 +318,9 @@ Claude's permission checker rejects any command that expands a variable, so Clau
 token itself from the organisation in it (`repos/redbubble/...` or `repos/teepublic/...`), so no
 command Claude runs contains a token or a variable. It only sends GET requests and allows only
 the flags a read needs (`-H`, `--jq`, `--template`, `--cache`, `-i`, `--paginate`, `--slurp`,
-`--silent`, `-X GET`), because local reviews give it your own token.
+`--silent`, `-X GET`), because local reviews give it your own token. `-H` only sets an `Accept`
+header for a GitHub JSON, raw, diff or patch response, and a `--jq` program can't read the
+environment (`env`, `$ENV`), where the tokens are.
 
 It also reads any other owner's repository, with the redbubble token, as long as it's public, so
 the review can read the upstream release notes of a dependency a PR bumps. It checks the
@@ -320,6 +329,17 @@ two organisations anyway, but locally your own token may. The review reads them 
 than with `WebFetch`, so every request still goes only to `api.github.com`, where whoever owns
 the repository can't see what was asked. The path can't contain `..` or `%`, which could move a
 request out of the repository it names.
+
+Outside redbubble and teepublic, it refuses release-asset downloads (`releases/assets`). Each
+asset's download count is public, so a prompt injection could otherwise send data to whoever owns
+the repository by choosing which assets to download. The release itself, with its notes, is still
+readable.
+
+`gh pr` and `gh issue` go through [`bin/gh`](bin/gh), first on Claude's PATH. It refuses
+`--repo`, URLs and `repo:`, `org:` or `user:` search qualifiers, and always talks to github.com, so
+those commands only reach the repository under review. Without it, they would read another
+owner's private repository with your token, or send a request to any host. Other repositories
+go through `gh-read`.
 
 ### Why `atlassian-read`
 
@@ -365,13 +385,14 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | Path | Purpose |
 | --- | --- |
 | `action.yml` | The action: decides whether to review, gets the tokens, checks out the rules and runs Claude. |
+| `bin/gh` | Wraps `gh` on Claude's PATH: keeps `gh pr` and `gh issue` to the repository under review, and `--jq` away from the environment. |
 | `bin/gh-read` | `gh api` for other repositories, with the right organisation's read-only token, and for public repositories anywhere on GitHub. |
 | `bin/atlassian-read` | Reads one Jira issue or Confluence page, as text, with the review's read-only Atlassian token. |
 | `bin/gh-review-threads` | Lists the PR's review threads, and resolves or replies to Claude's own. Hides Claude's earlier summaries and sets the PR's `claude-review:*` labels. |
 | `Dockerfile`, `docker-compose.yml` | The container local reviews run in: tools only. |
 | `scripts/run-local.sh` | Runs a local review of the repository you're in. |
 | `scripts/review-in-docker.sh` | Runs inside the container: starts Claude on the review. |
-| `scripts/git-in-docker.sh` | `git` inside the container: refuses `--output`, so git can't write files. |
+| `scripts/git-in-docker.sh` | `git` inside the container: refuses `--output`, `--no-index` and paths outside the repository, so git can't write files or read others. |
 
 ## Changing the action
 
@@ -515,11 +536,13 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   `mv` in the workspace) and git add, commit, rm and push tools. `action.yml` passes
   `--permission-mode default` after them, so the later flag wins, and denies those tools with
   `--disallowedTools`.
-- **Claude can read the run's tokens and post them.** `Read` reaches its own process
-  environment, and the inline-comment tool posts any text. The GitHub tokens in the job expire
-  when it ends, so a leak of one through a prompt injection lasts for the rest of the job at
-  most. That's why `contents: write` is opt-in.
-- **Claude can see the read-only tokens.** They're in its environment so it can use them. The
+- **Claude can't read its environment, where the API key and tokens are.** `action.yml` denies
+  `Read` under `/proc`, which also covers `Glob`, `Grep` and symlinks to it, and `gh` and
+  `gh-read` refuse a `--jq` program that reads the environment. Keep it that way for any tool you
+  add: a command that can print its environment or read any file gives the key away, and the
+  inline-comment tool posts any text. The GitHub tokens in the job expire when it ends, so a leak
+  of one lasts for the rest of the job at most. That's why `contents: write` is opt-in.
+- **The read-only tokens are in Claude's environment**, so the helpers it runs can use them. The
   GitHub tokens expire within an hour and are revoked when the job ends. The Atlassian access
   token isn't revoked: it lasts its full hour.
 - **The Atlassian client secret never reaches Claude.** Only the hour-long access token made from
