@@ -53,6 +53,23 @@ check_search() {
   fi
 }
 
+# gh pr list wraps its search in parentheses before adding repo:<this repository>, so a closing
+# parenthesis and OR in the search would search every repository the token can see:
+# `--search "fix) OR (x"`. gh puts --author, --label and the other filters in the same query. So
+# for gh pr list, no argument may hold query syntax: parentheses, quotes, a qualifier's colon, or
+# the operators OR, AND and NOT (upper case only, as GitHub reads them). Plain words, as the rules
+# search with, still work, lower-case "and" and "or" included.
+check_list_arg() {
+  case "$1" in
+    *[\(\)\"\'\\:]*)
+      refuse "$1 isn't allowed: gh pr list only takes plain words, without parentheses, quotes or qualifiers"
+      ;;
+  esac
+  if printf '%s' "$1" | grep -Eq '(^|[^A-Za-z0-9_])(OR|AND|NOT)($|[^A-Za-z0-9_])'; then
+    refuse "$1 isn't allowed: gh pr list can't take OR, AND or NOT, which would search outside this repository"
+  fi
+}
+
 # Every argument, wherever it is. This script doesn't know which of gh's flags take a value, so it
 # can't tell a flag's value from the next flag: gh reads `--head --jq --jq env` as --head "--jq"
 # and --jq env. So no argument may name the environment or another repository, whatever it is.
@@ -71,6 +88,9 @@ for arg in "$@"; do
   esac
   check_jq "$arg"
   check_search "$arg"
+  if [ "$1 ${2:-}" = "pr list" ]; then
+    check_list_arg "$arg"
+  fi
 done
 
 # The repository under review is on github.com, whatever a git remote says.

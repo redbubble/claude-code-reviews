@@ -348,7 +348,9 @@ readable.
 
 `gh pr` and `gh issue` go through [`bin/gh`](bin/gh), first on Claude's PATH. It refuses
 `--repo`, URLs and `repo:`, `org:` or `user:` search qualifiers, and always talks to github.com, so
-those commands only reach the repository under review. Without it, they would read another
+those commands only reach the repository under review. `gh pr list` only takes plain words: gh
+wraps its search in parentheses before adding the repository, so parentheses, quotes, qualifiers
+or `OR` in any of its arguments could search every repository the token can see. Without it, they would read another
 owner's private repository with your token, or send a request to any host. Other repositories
 go through `gh-read`.
 
@@ -377,7 +379,9 @@ Reading and resolving review threads needs GraphQL, and allowing `gh api graphql
 run any mutation with the run's write-capable `GITHUB_TOKEN` (close or edit PRs, post reviews).
 `gh-review-threads` only lists the PR's threads, and resolves or replies to threads on it that a
 Claude reviewer opened. Every command only acts on the PR under review, which `action.yml` passes
-in `REVIEW_PR` from the run's event, so a prompt injection can't make it change another PR. When the workflow doesn't have `contents: write`,
+in `REVIEW_PR` from the run's event, so a prompt injection can't make it change another PR. It
+only accepts thread IDs shaped like GraphQL node IDs, and sends every value to gh as a plain
+string (`-f`): with `-F`, gh reads a value starting with `@` as a file. When the workflow doesn't have `contents: write`,
 `resolve` hides the thread's first comment as resolved instead (see
 [Resolving or minimising earlier findings](#resolving-or-minimising-earlier-findings)).
 
@@ -561,9 +565,10 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   `--permission-mode default` after them, so the later flag wins, and denies those tools with
   `--disallowedTools`.
 - **Claude can't read its environment, where the API key and tokens are.** `action.yml` denies
-  `Read` under `/proc`, which also covers `Glob`, `Grep` and symlinks to it, and `gh` and
-  `gh-read` refuse a `--jq` program that reads the environment. Keep it that way for any tool you
-  add: a command that can print its environment or read any file gives the key away, and the
+  `Read` under `/proc`, which also covers `Glob`, `Grep` and symlinks to it, and `gh` and `gh-read`
+  refuse a `--jq` program that reads the environment. Keep it that way for any tool you add: a
+  command that can print its environment or read any file gives the key away, and so does a helper
+  that passes Claude's input to `gh api -F`, which reads a value starting with `@` as a file. The
   inline-comment tool posts any text. The GitHub tokens in the job expire when it ends, so a leak
   of one lasts for the rest of the job at most. That's why `contents: write` is opt-in.
 - **The read-only tokens are in Claude's environment**, so the helpers it runs can use them. The

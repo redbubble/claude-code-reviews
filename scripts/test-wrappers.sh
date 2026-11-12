@@ -23,7 +23,7 @@ if [ "$1" = api ] && [ "$3" = --jq ] && [ "$4" = .visibility ]; then
 fi
 # gh-review-threads' thread lookup: the thread's "<repo>#<pr> <first author> <first comment>".
 case "$*" in
-  *PullRequestReviewThread*)
+  *"on PullRequestReviewThread"*)
     echo "$STUB_THREAD"
     exit 0
     ;;
@@ -64,7 +64,7 @@ refuses() {
   allows gh pr view 12 --json title,body
   allows gh pr view my/feature-branch
   allows gh pr diff 12
-  allows gh pr list --search "is:open fix" --json number
+  allows gh pr list --search "open fix" --json number
   allows gh pr view 12 --json commits --jq '.commits[].messageHeadline'
   allows gh pr view 12 --json files --jq '.files[] | select(.path | test("environment"))'
   allows gh issue view 3 --comments
@@ -90,6 +90,21 @@ refuses() {
   refuses gh pr list -S "org:someone"
   refuses gh pr list --search="user:x fix"
   refuses gh pr list --head -S -S "repo:other/private"
+
+  # bin/gh: gh pr list with plain words only. gh wraps the search in parentheses before adding
+  # repo:<this repository>, so closing them escapes it: --search "fix) OR (x" searches everywhere.
+  allows gh pr list --state all --search "retries and backoff for uploads" --json number,title
+  allows gh pr list --head feature/x --author @me --label bug --limit 5
+  refuses gh pr list --state all --search "fix) OR (x"
+  refuses gh pr list --search "fix) (x"
+  refuses gh pr list --search 'fix" OR "x'
+  refuses gh pr list --search "fix OR x"
+  refuses gh pr list --search "fix AND NOT x"
+  refuses gh pr list --search "is:open fix"
+  refuses gh pr list --author "x) OR (y"
+  refuses gh pr list --label 'a\) OR \(b'
+  refuses gh pr list --json number --jq '.[] | select(.number > 1)'
+  refuses gh pr list --head --search --search "fix) OR (x"
 
   # bin/gh: a --jq program that reads the environment, including after a flag that takes the next
   # argument as its value (gh reads --head --jq --jq env as --head "--jq" and --jq env).
@@ -124,6 +139,21 @@ refuses() {
   refuses gh-read repos/redbubble/x -q '[env[]]'
   refuses gh-read repos/redbubble/x -t --jq env
   refuses gh-read repos/redbubble/x -X POST
+
+  # gh-review-threads: a thread ID is only ever a plain string, never a file to read (-F @path).
+  export GITHUB_REPOSITORY=redbubble/x REVIEW_PR=12
+  STUB_THREAD="redbubble/x#12 github-actions C1" refuses gh-review-threads resolve @/proc/self/environ
+  STUB_THREAD="redbubble/x#12 github-actions C1" refuses gh-review-threads reply @README.md "hi"
+  STUB_THREAD="redbubble/x#12 github-actions C1" refuses gh-review-threads resolve "PRRT_x y"
+  STUB_THREAD="redbubble/x#12 github-actions C1" refuses gh-review-threads resolve ""
+  sent=$(STUB_THREAD="redbubble/x#12 github-actions C1" gh-review-threads reply PRRT_kwDOabc-_= hi 2>&1)
+  case "$sent" in
+    *"-f id=PRRT_kwDOabc-_= -f body=hi"*) passed=$((passed + 1)) ;;
+    *)
+      failed=$((failed + 1))
+      echo "FAIL: gh-review-threads reply doesn't send the thread ID with -f: $sent"
+      ;;
+  esac
 
   # gh-review-threads: only the pull request in REVIEW_PR, whatever number Claude gives.
   export GITHUB_REPOSITORY=redbubble/x REVIEW_PR=12
