@@ -53,7 +53,7 @@ runs:
   using: composite
   steps:
     # Whether to review: not a draft, and not a PR that only holds a decision record, from a branch
-    # named adr-<epoch>-... changing nothing outside docs/adr/. Those are discussed on the PR
+    # named adr-<epoch>-... into the default branch, changing nothing outside docs/adr/. Those are discussed on the PR
     # instead (see docs/adr/1792646959-record-architecture-decisions.md in
     # redbubble/claude-code-reviews-rules). A draft is reviewed when the run comes from a label
     # being added: someone asked for it. Skipped steps leave the job passing, so a required check
@@ -76,20 +76,21 @@ runs:
           exit 1
         fi
         # If either can't be read, fail rather than skip: a skip passes the check.
-        private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private) || {
+        repo_state=$(gh api "repos/$GITHUB_REPOSITORY" --jq '"\(.private) \(.default_branch)"') || {
           echo "::error::Couldn't read whether $GITHUB_REPOSITORY is private"
           exit 1
         }
+        private=${repo_state%% *}
+        default_branch=${repo_state#* }
         if [ "$private" != true ]; then
           echo "::error::The review only runs in private repositories: it reads private code, Jira and Confluence, and posts what it finds on the pull request"
           exit 1
         fi
-        pr_state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '"\(.draft) \(.changed_files)"') || {
+        pr_state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '"\(.draft) \(.changed_files) \(.base.ref)"') || {
           echo "::error::Couldn't read pull request #$PR"
           exit 1
         }
-        draft=${pr_state% *}
-        changed_files=${pr_state#* }
+        read -r draft changed_files base_ref <<<"$pr_state"
 
         marker='<!-- claude-code-review-skipped -->'
         comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
@@ -118,7 +119,9 @@ runs:
           echo run=false >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        if [[ $HEAD_REF == adr-* ]]; then
+        # Only against the default branch: against a branch the author pushed, an ADR-only diff
+        # could hide other changes that a later change of base brings in.
+        if [[ $HEAD_REF == adr-* ]] && [ "$base_ref" = "$default_branch" ]; then
           # Current and previous names, so moving a file into docs/adr/ doesn't count as ADR-only.
           # One file per line, as tab-separated names: @tsv escapes a tab or newline in a name. The
           # list stops at 3000 files, so it only counts when it has every file the PR changes. If

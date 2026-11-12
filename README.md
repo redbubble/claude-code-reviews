@@ -63,14 +63,14 @@ This relies on the one-time setup in [CI Bootstrapping](#ci-bootstrapping).
 
 ### Pull requests that aren't reviewed
 
-Pull requests that only hold an architecture decision record aren't reviewed: they're discussed
-on the PR instead. A PR counts as one when its branch name starts with `adr-` and every file it
-changes, including a renamed file's old name, is under `docs/adr/`. Any other change from an
-`adr-` branch is reviewed as usual. A PR the review skips still passes the `claude-review` check,
-so a required check doesn't block it. So the pass isn't mistaken for a review, the skip also posts
-one comment on the PR saying why. Later skips update that comment rather than adding another, and
-it stays after a review runs, as a record of the skip. A skipped draft gets no comment: it's
-reviewed once it's marked ready.
+Pull requests that only hold an architecture decision record aren't reviewed: they're discussed on
+the PR instead. A PR counts as one when its branch name starts with `adr-`, it's against the
+repository's default branch, and every file it changes, including a renamed file's old name, is
+under `docs/adr/`. Any other change from an `adr-` branch is reviewed as usual. A PR the review
+skips still passes the `claude-review` check, so a required check doesn't block it. So the pass
+isn't mistaken for a review, the skip also posts one comment on the PR saying why. Later skips
+update that comment rather than adding another, and it stays after a review runs, as a record of
+the skip. A skipped draft gets no comment: it's reviewed once it's marked ready.
 
 ### A repository's own rules
 
