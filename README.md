@@ -404,7 +404,7 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | `Dockerfile`, `docker-compose.yml` | The container local reviews run in: tools only. |
 | `scripts/run-local.sh` | Runs a local review of the repository you're in. |
 | `scripts/review-in-docker.sh` | Runs inside the container: starts Claude on the review. |
-| `scripts/test-wrappers.sh` | Tests what `bin/gh`, `bin/gh-read` and `scripts/git-in-docker.sh` refuse and allow, with a stub `gh`. |
+| `scripts/test-wrappers.sh` | Tests what `bin/gh`, `bin/gh-read`, `bin/gh-review-threads` and `scripts/git-in-docker.sh` refuse and allow, with a stub `gh`. |
 | `scripts/git-in-docker.sh` | `git` inside the container: refuses `--output`, `--no-index` and paths outside the repository, so git can't write files or read others. |
 
 ## Changing the action
