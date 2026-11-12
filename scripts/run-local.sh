@@ -96,30 +96,25 @@ extract_token() {
 setup_token() {
   [ -t 0 ] || die "no Anthropic credential: set ANTHROPIC_API_KEY, or run this in a terminal to set up a token"
   warn "creating a Claude Code token for local reviews (needs a Claude subscription)"
-  local recording token
+  local recording token cmd
+  # mktemp -d makes a folder only you can open. The recording holds the token: remove it however
+  # this ends.
   recording=$(mktemp -d)
-  # The recording holds the token: remove it however this ends.
   trap 'rm -rf "$recording"' EXIT
   if command -v claude > /dev/null; then
     warn "log in in the browser window it opens, and paste the code you get back into it"
-    if [ "$(uname)" = Darwin ]; then
-      script -q "$recording/screen" claude setup-token
-    else
-      script -q -c "claude setup-token" "$recording/screen"
-    fi
+    cmd=(claude setup-token)
   else
     warn "Claude Code isn't installed here, so this runs in the container and can't open your browser:"
     warn "open the link it prints, log in, and paste the code you get back into it"
-    # The container's user has to write the recording. Docker Desktop for Mac lets it. Elsewhere,
-    # it runs as another user: let it write one file it can't read back, in a folder no one else
-    # can list or add to (script opens its file write-only).
-    if [ "$(uname)" != Darwin ]; then
-      chmod 711 "$recording"
-      : > "$recording/screen"
-      chmod 622 "$recording/screen"
-    fi
-    "${compose[@]}" run --rm -v "$recording:/out" --entrypoint script review \
-      -q -c "claude setup-token" /out/screen
+    cmd=("${compose[@]}" run --rm --entrypoint claude review setup-token)
+  fi
+  # script runs here, as you, and records the screen either way, so the container never writes the
+  # file and no other user can.
+  if [ "$(uname)" = Darwin ]; then
+    script -q "$recording/screen" "${cmd[@]}"
+  else
+    script -q -c "$(printf '%q ' "${cmd[@]}")" "$recording/screen"
   fi
   printf '\033[?2004l' >&2
   # No perl, no recording or no token in it: each falls back to asking for the token below.

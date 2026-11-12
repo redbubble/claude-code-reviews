@@ -1,6 +1,7 @@
 #!/bin/bash
-# Tests the wrappers that keep the review's commands in bounds: bin/gh, bin/gh-read and
-# scripts/git-in-docker.sh. Run it after changing any of them; it needs no network, token or Docker.
+# Tests the wrappers that keep the review's commands in bounds: bin/gh, bin/gh-read,
+# bin/gh-review-threads and scripts/git-in-docker.sh. Run it after changing any of them; it needs
+# no network, token or Docker.
 #
 # A stub gh stands in for the real one: it prints the arguments it was given, and says any
 # repository is public when gh-read asks. So these tests check what each wrapper refuses and what it
@@ -20,6 +21,13 @@ if [ "$1" = api ] && [ "$3" = --jq ] && [ "$4" = .visibility ]; then
   echo public
   exit 0
 fi
+# gh-review-threads' thread lookup: the thread's "<repo>#<pr> <first author> <first comment>".
+case "$*" in
+  *PullRequestReviewThread*)
+    echo "$STUB_THREAD"
+    exit 0
+    ;;
+esac
 echo "gh GH_HOST=${GH_HOST:-} :: $*"
 EOF
 chmod +x "$tmp/stub/gh"
@@ -116,6 +124,25 @@ refuses() {
   refuses gh-read repos/redbubble/x -q '[env[]]'
   refuses gh-read repos/redbubble/x -t --jq env
   refuses gh-read repos/redbubble/x -X POST
+
+  # gh-review-threads: only the pull request in REVIEW_PR, whatever number Claude gives.
+  export GITHUB_REPOSITORY=redbubble/x REVIEW_PR=12
+  allows gh-review-threads list 12
+  allows gh-review-threads hide-summaries 12
+  allows gh-review-threads labels 12 important
+  refuses gh-review-threads list 13
+  refuses gh-review-threads hide-summaries 13
+  refuses gh-review-threads labels 13 important
+  refuses gh-review-threads labels 012 important
+  STUB_THREAD="redbubble/x#12 github-actions C1" allows gh-review-threads reply T1 "Fixed, thanks"
+  STUB_THREAD="redbubble/x#12 claude C1" allows gh-review-threads resolve T1
+  STUB_THREAD="redbubble/x#13 github-actions C1" refuses gh-review-threads reply T1 "Fixed"
+  STUB_THREAD="redbubble/x#13 github-actions C1" refuses gh-review-threads resolve T1
+  STUB_THREAD="redbubble/other#12 github-actions C1" refuses gh-review-threads resolve T1
+  STUB_THREAD="redbubble/x#12 someone C1" refuses gh-review-threads resolve T1
+  REVIEW_PR='' refuses gh-review-threads list 12
+  REVIEW_PR=12abc refuses gh-review-threads list 12
+  unset GITHUB_REPOSITORY REVIEW_PR
 
   # git-in-docker.sh, as `git`, in a scratch repository.
   mkdir "$tmp/git" "$tmp/work"

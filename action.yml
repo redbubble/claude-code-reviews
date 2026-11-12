@@ -53,11 +53,13 @@ runs:
   using: composite
   steps:
     # Whether to review: not a draft, and not a PR that only holds a decision record, from a branch
-    # named adr-<epoch>-... changing nothing outside docs/adr/. Those are discussed on the PR
+    # named adr-<epoch>-... into the default branch, changing nothing outside docs/adr/. Those are discussed on the PR
     # instead (see docs/adr/1792646959-record-architecture-decisions.md in
     # redbubble/claude-code-reviews-rules). A draft is reviewed when the run comes from a label
     # being added: someone asked for it. Skipped steps leave the job passing, so a required check
-    # is satisfied. A decision-record skip also says why in one PR comment, updated rather than
+    # is satisfied. The draft state, visibility and changed files are read from GitHub when the step
+    # runs, never from the event: a re-run replays the event as it was when the run was created, so
+    # a run from while the PR was a draft would otherwise skip again after it's marked ready. A decision-record skip also says why in one PR comment, updated rather than
     # repeated; a draft doesn't, as it's reviewed once it's ready. A public repository fails the
     # job instead, before any token is made: the review reads private repositories, Jira and
     # Confluence, and anyone could read what it posts there.
@@ -66,8 +68,6 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR: ${{ github.event.pull_request.number }}
-        PRIVATE: ${{ github.event.repository.private }}
-        DRAFT: ${{ github.event.pull_request.draft }}
         EVENT_ACTION: ${{ github.event.action }}
         HEAD_REF: ${{ github.event.pull_request.head.ref }}
       run: |
@@ -75,10 +75,22 @@ runs:
           echo "::error::The review only runs on pull_request events"
           exit 1
         fi
-        if [ "$PRIVATE" != true ]; then
+        # If either can't be read, fail rather than skip: a skip passes the check.
+        repo_state=$(gh api "repos/$GITHUB_REPOSITORY" --jq '"\(.private) \(.default_branch)"') || {
+          echo "::error::Couldn't read whether $GITHUB_REPOSITORY is private"
+          exit 1
+        }
+        private=${repo_state%% *}
+        default_branch=${repo_state#* }
+        if [ "$private" != true ]; then
           echo "::error::The review only runs in private repositories: it reads private code, Jira and Confluence, and posts what it finds on the pull request"
           exit 1
         fi
+        pr_state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '"\(.draft) \(.changed_files) \(.base.ref)"') || {
+          echo "::error::Couldn't read pull request #$PR"
+          exit 1
+        }
+        read -r draft changed_files base_ref <<<"$pr_state"
 
         marker='<!-- claude-code-review-skipped -->'
         comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
@@ -102,17 +114,23 @@ runs:
           exit 0
         }
 
-        if [ "$DRAFT" = true ] && [ "$EVENT_ACTION" != labeled ]; then
+        if [ "$draft" = true ] && [ "$EVENT_ACTION" != labeled ]; then
           echo "::notice::Draft pull request: reviewed once it's marked ready, or when the review label is added"
           echo run=false >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        if [[ $HEAD_REF == adr-* ]]; then
+        # Only against the default branch: against a branch the author pushed, an ADR-only diff
+        # could hide other changes that a later change of base brings in.
+        if [[ $HEAD_REF == adr-* ]] && [ "$base_ref" = "$default_branch" ]; then
           # Current and previous names, so moving a file into docs/adr/ doesn't count as ADR-only.
-          # If the list can't be read, review as usual rather than skip.
-          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
-            --jq '.[] | .filename, (.previous_filename // empty)') || files=
-          if [ -n "$files" ] && ! grep -qv '^docs/adr/' <<<"$files"; then
+          # One file per line, as tab-separated names: @tsv escapes a tab or newline in a name. The
+          # list stops at 3000 files, so it only counts when it has every file the PR changes. If
+          # it can't be read, or is short, review as usual rather than skip.
+          rows=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
+            --jq '.[] | [.filename, (.previous_filename // "")] | @tsv') || rows=
+          listed=$(grep -c . <<<"$rows") || listed=0
+          names=$(tr '\t' '\n' <<<"$rows" | sed '/^$/d')
+          if [ "$listed" -gt 0 ] && [ "$listed" = "$changed_files" ] && ! grep -qv '^docs/adr/' <<<"$names"; then
             skip_with_comment "only changes docs/adr/. Decision records are discussed on the pull request, not reviewed."
           fi
         fi
@@ -220,8 +238,10 @@ runs:
       if: steps.scope.outputs.run == 'true'
       uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
       # For gh-read. Not GH_TOKEN: the action sets that to github_token for posting the review.
-      # ATLASSIAN_READ_TOKEN is for atlassian-read.
+      # ATLASSIAN_READ_TOKEN is for atlassian-read. REVIEW_PR is the only pull request
+      # gh-review-threads acts on.
       env:
+        REVIEW_PR: ${{ github.event.pull_request.number }}
         RB_READ_TOKEN: ${{ steps.rb-token.outputs.token }}
         TP_READ_TOKEN: ${{ steps.tp-token.outputs.token }}
         ATLASSIAN_READ_TOKEN: ${{ steps.atlassian-token.outputs.token }}

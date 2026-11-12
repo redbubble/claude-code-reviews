@@ -50,7 +50,11 @@ Then:
    merging.
 
 With this workflow, a review runs when a PR is opened, reopened, marked ready for review, or
-pushed to, and a new push cancels a review still running on the previous one. To change when it
+pushed to, and a new push cancels a review still running on the previous one. Changing a PR's
+base branch doesn't start one: the check keeps the result of the review against the old base,
+whose diff may have been much smaller. After changing the base, push a commit, or close and reopen
+the PR, to review it against the new one. (claude-code-action can't run on the `edited` event a
+base change sends.) To change when it
 runs, see [Configuring the workflow](#configuring-the-workflow). Draft PRs aren't reviewed until
 they're marked ready, unless the run comes from a label being added (see
 [Reviewing only when asked](#reviewing-only-when-asked)).
@@ -59,14 +63,14 @@ This relies on the one-time setup in [CI Bootstrapping](#ci-bootstrapping).
 
 ### Pull requests that aren't reviewed
 
-Pull requests that only hold an architecture decision record aren't reviewed: they're discussed
-on the PR instead. A PR counts as one when its branch name starts with `adr-` and every file it
-changes, including a renamed file's old name, is under `docs/adr/`. Any other change from an
-`adr-` branch is reviewed as usual. A PR the review skips still passes the `claude-review` check,
-so a required check doesn't block it. So the pass isn't mistaken for a review, the skip also posts
-one comment on the PR saying why. Later skips update that comment rather than adding another, and
-it stays after a review runs, as a record of the skip. A skipped draft gets no comment: it's
-reviewed once it's marked ready.
+Pull requests that only hold an architecture decision record aren't reviewed: they're discussed on
+the PR instead. A PR counts as one when its branch name starts with `adr-`, it's against the
+repository's default branch, and every file it changes, including a renamed file's old name, is
+under `docs/adr/`. Any other change from an `adr-` branch is reviewed as usual. A PR the review
+skips still passes the `claude-review` check, so a required check doesn't block it. So the pass
+isn't mistaken for a review, the skip also posts one comment on the PR saying why. Later skips
+update that comment rather than adding another, and it stays after a review runs, as a record of
+the skip. A skipped draft gets no comment: it's reviewed once it's marked ready.
 
 ### A repository's own rules
 
@@ -118,6 +122,10 @@ jobs:
 Add the `claude-review` label to a pull request to review it, draft or not. To review a later
 push, remove the label and add it again. The `if:` matters: without it, adding any other label
 starts a job that cancels a review in progress.
+
+Don't make the `claude-review` check required with this workflow. GitHub counts a job its `if:`
+skips as passed, so adding any other label to a pull request passes the check without a review.
+A required check needs the default triggers in [Usage](#usage), where every push is reviewed.
 
 ### Pinning the logic
 
@@ -367,8 +375,9 @@ in CI it sends the access token as a Bearer token.
 
 Reading and resolving review threads needs GraphQL, and allowing `gh api graphql` would let Claude
 run any mutation with the run's write-capable `GITHUB_TOKEN` (close or edit PRs, post reviews).
-`gh-review-threads` only lists the PR's threads, and resolves or replies to threads in the same
-repository that a Claude reviewer opened. When the workflow doesn't have `contents: write`,
+`gh-review-threads` only lists the PR's threads, and resolves or replies to threads on it that a
+Claude reviewer opened. Every command only acts on the PR under review, which `action.yml` passes
+in `REVIEW_PR` from the run's event, so a prompt injection can't make it change another PR. When the workflow doesn't have `contents: write`,
 `resolve` hides the thread's first comment as resolved instead (see
 [Resolving or minimising earlier findings](#resolving-or-minimising-earlier-findings)).
 
@@ -395,7 +404,7 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | `Dockerfile`, `docker-compose.yml` | The container local reviews run in: tools only. |
 | `scripts/run-local.sh` | Runs a local review of the repository you're in. |
 | `scripts/review-in-docker.sh` | Runs inside the container: starts Claude on the review. |
-| `scripts/test-wrappers.sh` | Tests what `bin/gh`, `bin/gh-read` and `scripts/git-in-docker.sh` refuse and allow, with a stub `gh`. |
+| `scripts/test-wrappers.sh` | Tests what `bin/gh`, `bin/gh-read`, `bin/gh-review-threads` and `scripts/git-in-docker.sh` refuse and allow, with a stub `gh`. |
 | `scripts/git-in-docker.sh` | `git` inside the container: refuses `--output`, `--no-index` and paths outside the repository, so git can't write files or read others. |
 
 ## Changing the action
@@ -409,8 +418,9 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
   inputs; don't remove or change them under rules that use them.
 - Claude can only run a new helper in `bin/` once it's in `--allowedTools` in `action.yml`. Check
   it for a way to write files first (see [Security notes](#security-notes)).
-- After changing `bin/gh`, `bin/gh-read` or `scripts/git-in-docker.sh`, run
-  `scripts/test-wrappers.sh`, and add a case for anything new they refuse.
+- After changing `bin/gh`, `bin/gh-read`, `bin/gh-review-threads` or
+  `scripts/git-in-docker.sh`, run `scripts/test-wrappers.sh`, and add a case for anything new
+  they refuse.
 - Changes to the rules go to redbubble/claude-code-reviews-rules, and so do decisions about
   either repository, as ADRs.
 
