@@ -1,0 +1,79 @@
+#!/bin/sh
+# Installed as `gh`, ahead of the real one on the review's PATH (bin/ in CI, the helpers folder in
+# the local container), so the `gh pr` and `gh issue` commands Claude may run only reach the
+# repository under review, on github.com. Other repositories go through gh-read, which checks the
+# owner and visibility. Without this, `--repo`, a pull request URL or a search qualifier would let
+# Claude read another owner's private repository with the token gh holds (locally, the engineer's
+# own), or send a request to a host of its choosing.
+#
+# For the same reason, a --jq program can't read the environment (`env`, `$ENV`), where the
+# review's tokens and API key are. Every other gh command passes through unchanged: gh-read and
+# gh-review-threads run `gh api` through this script too.
+set -eu
+refuse() {
+  echo "gh: $*" >&2
+  exit 2
+}
+
+# The real gh: the first one on PATH that isn't this script.
+self_dir=$(cd "$(dirname "$0")" && pwd -P)
+real=
+set -f
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] || continue
+  # A PATH entry that doesn't exist can't be this script's folder: skip it quietly.
+  [ "$(cd "$dir" 2> /dev/null && pwd -P)" = "$self_dir" ] && continue
+  if [ -f "$dir/gh" ] && [ -x "$dir/gh" ]; then
+    real="$dir/gh"
+    break
+  fi
+done
+IFS=$old_ifs
+set +f
+[ -n "$real" ] || refuse "can't find the real gh on PATH"
+
+case "${1:-}" in
+  pr | issue) ;;
+  *) exec "$real" "$@" ;;
+esac
+
+# A jq program that names the env builtin or $ENV. Checked against every argument, so a branch
+# name with env as a word of its own (fix-env) is refused too: the review passes PR numbers.
+check_jq() {
+  if printf '%s' "$1" | grep -Eq '(^|[^A-Za-z0-9_])(env|ENV)($|[^A-Za-z0-9_])'; then
+    refuse "$1 isn't allowed: no argument may name env or ENV, so a --jq program can't read the environment"
+  fi
+}
+# A search that names another repository, organisation or user. Checked against every argument.
+check_search() {
+  if printf '%s' "$1" | grep -Eiq '(^|[^a-z])(repo|org|user|owner)[[:space:]]*:'; then
+    refuse "--search can't name a repository, organisation or user: it only searches this repository. Read others with gh-read"
+  fi
+}
+
+# Every argument, wherever it is. This script doesn't know which of gh's flags take a value, so it
+# can't tell a flag's value from the next flag: gh reads `--head --jq --jq env` as --head "--jq"
+# and --jq env. So no argument may name the environment or another repository, whatever it is.
+for arg in "$@"; do
+  case "$arg" in
+    -R | --repo | --repo=*)
+      refuse "--repo isn't allowed: gh only reads the repository under review. Read others with gh-read"
+      ;;
+    --hostname | --hostname=*) refuse "--hostname isn't allowed" ;;
+    --*) ;;
+    -?) ;;
+    -*) refuse "$arg isn't allowed: give each short flag on its own, with its value as the next argument" ;;
+    *://* | */*#*)
+      refuse "$arg isn't allowed: give a number or branch in the repository under review. Read others with gh-read"
+      ;;
+  esac
+  check_jq "$arg"
+  check_search "$arg"
+done
+
+# The repository under review is on github.com, whatever a git remote says.
+GH_HOST=github.com
+export GH_HOST
+exec "$real" "$@"
