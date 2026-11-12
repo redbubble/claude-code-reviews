@@ -131,6 +131,9 @@ starts a job that cancels a review in progress.
 We keep the action working with every rules version, so most repositories leave this on
 `master` and pin the rules instead.
 
+Either way, the actions this one uses are pinned to commit SHAs in `action.yml`, so a pinned
+commit of this action always runs the same code.
+
 ### Pinning the rules
 
 The rules follow `master` of redbubble/claude-code-reviews-rules by default, so a rule change
@@ -515,6 +518,14 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   can read them in every repository that follows `master`. `master` is protected: every change
   needs a pull request approved by a code owner, with no bypass. A repository that needs more
   control can [pin the logic](#pinning-the-logic) to a commit it has read.
+- **The actions this one uses are pinned to commit SHAs.** `actions/checkout`,
+  `actions/create-github-app-token` and `anthropics/claude-code-action` all run with the
+  secrets. A tag such as `@v1` can be moved to other code by whoever controls that repository,
+  and that code would then run in every review. A SHA can't be moved. Dependabot
+  (`.github/dependabot.yml`) proposes updates as pull requests. Before merging one for
+  claude-code-action, check which tools its tag mode adds (`src/modes/tag/index.ts`) against
+  `--disallowedTools` in `action.yml`: tag mode once added `git diff` and `git log`, which write
+  files with `--output`.
 - **The app's private key is the sensitive part.** Anyone holding it can read every repository in
   both organisations. Org secrets are readable by any workflow in a repository that can access
   them, including a `pull_request` workflow on a branch someone just pushed. Limit

@@ -5,6 +5,12 @@ author: Articore
 # The calling job sets the triggers, permissions, timeout and concurrency: a composite action
 # can't. See the README for the workflow to copy. Rules come from the private
 # redbubble/claude-code-reviews-rules at run time, the helpers in bin/ from this action.
+#
+# Every action used here gets this repository's secrets, so each is pinned to a full commit SHA,
+# with its version alongside: a moved tag can't change the code they run with, and a consumer that
+# pins this action pins them too. Dependabot proposes updates (.github/dependabot.yml). Before
+# merging one for claude-code-action, check the tools tag mode adds against --disallowedTools
+# below.
 
 inputs:
   anthropic-api-key:
@@ -114,21 +120,21 @@ runs:
         echo run=true >> "$GITHUB_OUTPUT"
 
     - if: steps.scope.outputs.run == 'true'
-      uses: actions/checkout@v6
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         fetch-depth: 1
 
     # Read-only tokens from the review GitHub App, one per organisation.
     - id: rb-token
       if: steps.scope.outputs.run == 'true'
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
       with:
         app-id: 5389235
         private-key: ${{ inputs.app-private-key }}
         owner: redbubble
     - id: tp-token
       if: steps.scope.outputs.run == 'true'
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
       with:
         app-id: 5389235
         private-key: ${{ inputs.app-private-key }}
@@ -136,7 +142,7 @@ runs:
 
     # The review rules. Checked out after the PR, so they replace anything the PR puts at this path.
     - if: steps.scope.outputs.run == 'true'
-      uses: actions/checkout@v6
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         repository: redbubble/claude-code-reviews-rules
         ref: ${{ inputs.rules-ref }}
@@ -212,7 +218,7 @@ runs:
     # tokens. The gh on PATH is bin/gh, which keeps gh pr and gh issue to this repository.
     - id: review
       if: steps.scope.outputs.run == 'true'
-      uses: anthropics/claude-code-action@v1
+      uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
       # For gh-read. Not GH_TOKEN: the action sets that to github_token for posting the review.
       # ATLASSIAN_READ_TOKEN is for atlassian-read.
       env:

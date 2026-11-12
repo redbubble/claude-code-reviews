@@ -1,0 +1,11 @@
+# Proposes updates to the actions action.yml pins by commit SHA, as pull requests a code owner
+# reviews. See the comment at the top of action.yml for what to check.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
