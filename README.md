@@ -199,8 +199,8 @@ up to v0.14 ignore it and cap Nits at 5 instead. For local reviews, set
 ### Metrics in Datadog
 
 With `datadog-api-key` (as in Usage), every run sends metrics to Datadog at the end of the job,
-including runs that skip a draft or a decision record. Without it, none are sent. For a site
-other than the default `datadoghq.com`, add `datadog-site`, such as `datadoghq.eu`.
+including runs that skip a draft or a decision record. Without it, none are sent. They go to
+Articore's Datadog site, US1 (`api.datadoghq.com`).
 
 | Metric | Type | What it is |
 | --- | --- | --- |
@@ -573,7 +573,7 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   `REVIEW_APP_PRIVATE_KEY` to the repositories that use the review where practical, and rotate it
   (generate a new key, update both org secrets, delete the old key) if it may have leaked.
 - **The Datadog API key never reaches Claude.** Only the last step, after the review, gets it,
-  and it only sends to a known Datadog site. A leaked key can send data to Datadog but can't read
+  and it only sends to `api.datadoghq.com`. A leaked key can send data to Datadog but can't read
   anything from it.
 - **Installations by other accounts are harmless.** Making the app installable by any account
   lets others install it on their own accounts. That gives this app read access to *their*

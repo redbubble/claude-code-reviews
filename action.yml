@@ -54,10 +54,6 @@ inputs:
       metrics are sent. It never reaches Claude.
     required: false
     default: ''
-  datadog-site:
-    description: The Datadog site the metrics go to, such as datadoghq.com or datadoghq.eu.
-    required: false
-    default: datadoghq.com
 
 runs:
   using: composite
@@ -357,8 +353,8 @@ runs:
         gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/review-comment.md" > /dev/null \
           || echo "::warning::Couldn't add the cost line to the review comment"
 
-    # The run's metrics, to Datadog, when there's an API key. Last, so the total includes every
-    # step; the post-job cleanup after it isn't included. Skips (drafts and decision records) send
+    # The run's metrics, to Datadog (US1, api.datadoghq.com), when there's an API key. Last, so
+    # the total includes every step; the post-job cleanup after it isn't included. Skips (drafts and decision records) send
     # the run and its time only: no zeros for Claude. Tags: repo, outcome, trigger (auto, label for
     # a run from a label being added, rerun for a re-run) and model. The cost is the same estimate
     # as the cost line. The key only goes to this step, and to curl on stdin, so it isn't in the
@@ -367,7 +363,6 @@ runs:
       shell: bash
       env:
         DD_API_KEY: ${{ inputs.datadog-api-key }}
-        DD_SITE: ${{ inputs.datadog-site }}
         JOB_START: ${{ steps.start.outputs.epoch }}
         RUN: ${{ steps.scope.outputs.run }}
         SKIP: ${{ steps.scope.outputs.skip }}
@@ -376,11 +371,6 @@ runs:
         EVENT_ACTION: ${{ github.event.action }}
         MODEL: ${{ inputs.model }}
       run: |
-        # Only a known site, so the key can't be sent anywhere else.
-        case $DD_SITE in
-          datadoghq.com | us3.datadoghq.com | us5.datadoghq.com | datadoghq.eu | ap1.datadoghq.com | ap2.datadoghq.com | ddog-gov.com) ;;
-          *) echo "::warning::datadog-site isn't a Datadog site, so no metrics were sent"; exit 0 ;;
-        esac
         if ! [[ $DD_API_KEY =~ ^[A-Za-z0-9]+$ ]]; then
           echo "::warning::datadog-api-key isn't a Datadog API key, so no metrics were sent"
           exit 0
@@ -433,7 +423,7 @@ runs:
         send() {
           printf 'header = "DD-API-KEY: %s"\n' "$DD_API_KEY" \
             | curl -fsS --max-time 20 --config - -H 'Content-Type: application/json' \
-              --data-binary "$2" "https://api.$DD_SITE$1" > /dev/null
+              --data-binary "$2" "https://api.datadoghq.com$1" > /dev/null
         }
         send /api/v2/series "$series" || echo "::warning::Couldn't send the run count and tokens to Datadog"
         send /api/v1/distribution_points "$dists" || echo "::warning::Couldn't send the run's time and cost to Datadog"
