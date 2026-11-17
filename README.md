@@ -37,6 +37,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           app-private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
           atlassian-client-secret: ${{ secrets.ATLASSIAN_CLIENT_SECRET }}
+          datadog-api-key: ${{ secrets.DATADOG_API_KEY }}
 ```
 
 Then:
@@ -194,6 +195,32 @@ It must be a number from 1 to 999, and it's a hard limit: Important findings sti
 but no more than that are posted, even when that leaves some Important ones out. Rules versions
 up to v0.14 ignore it and cap Nits at 5 instead. For local reviews, set
 `CLAUDE_REVIEW_MAX_FINDINGS`.
+
+### Metrics in Datadog
+
+With `datadog-api-key` (as in Usage), every run sends metrics to Datadog at the end of the job,
+including runs that skip a draft or a decision record. Without it, none are sent. They go to
+Articore's Datadog site, US1 (`api.datadoghq.com`).
+
+| Metric | Type | What it is |
+| --- | --- | --- |
+| `github.actions.claude_review.runs` | count | 1 per run |
+| `github.actions.claude_review.duration.total` | distribution | Seconds from the job's start to the end of the last step |
+| `github.actions.claude_review.duration.claude` | distribution | Seconds Claude spent on the review |
+| `github.actions.claude_review.cost_usd` | distribution | The review's cost, the same estimate as the cost line |
+| `github.actions.claude_review.tokens` | count | Tokens, by `token_type`: `input`, `output`, `cache_write`, `cache_read` |
+
+Every metric is tagged with `repo`, `model`, `trigger` (`auto`, `label` for a run from a label
+being added, or `rerun`) and `outcome`: `success`, `failure`, `cancelled`, `not_started` (an
+earlier step failed or the run was cancelled before the review started), `skipped_draft` or
+`skipped_adr`. Skipped runs send `runs` and `duration.total` only. The time spent outside the
+review is `duration.total` minus `duration.claude`. The total leaves out the post-job cleanup
+after the last step, usually a few seconds.
+
+A review that fails after Claude returns a result, such as running out of turns, still sends its
+cost, time and tokens, tagged `outcome:failure`. Runs cancelled during the review, or that fail
+before Claude returns a result, send no cost, though Anthropic still charges for them. For the
+real cost of all reviews, see the API key's usage in the Anthropic Console.
 
 ### Resolving or minimising earlier findings
 
@@ -477,6 +504,7 @@ New organization secret*:
 | --- | --- |
 | `REVIEW_APP_PRIVATE_KEY` | The whole contents of the `.pem` file, including the `BEGIN`/`END` lines |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
+| `DATADOG_API_KEY` | Datadog API key for the review's metrics, used only for them. Optional. |
 
 For *Repository access*, choose the repositories that use the review (or all private
 repositories).
@@ -546,6 +574,9 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   them, including a `pull_request` workflow on a branch someone just pushed. Limit
   `REVIEW_APP_PRIVATE_KEY` to the repositories that use the review where practical, and rotate it
   (generate a new key, update both org secrets, delete the old key) if it may have leaked.
+- **The Datadog API key never reaches Claude.** Only the last step, after the review, gets it,
+  and it only sends to `api.datadoghq.com`. A leaked key can send data to Datadog but can't read
+  anything from it.
 - **Installations by other accounts are harmless.** Making the app installable by any account
   lets others install it on their own accounts. That gives this app read access to *their*
   repositories, never them access to ours. The action always asks for the redbubble or
