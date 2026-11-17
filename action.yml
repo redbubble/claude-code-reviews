@@ -48,10 +48,43 @@ inputs:
     description: The token the review is posted with.
     required: false
     default: ${{ github.token }}
+  datadog-api-key:
+    description: >-
+      Datadog API key, to send the run's metrics: count, time, cost and tokens. Without it, no
+      metrics are sent. It never reaches Claude.
+    required: false
+    default: ''
+  datadog-site:
+    description: The Datadog site the metrics go to, such as datadoghq.com or datadoghq.eu.
+    required: false
+    default: datadoghq.com
 
 runs:
   using: composite
   steps:
+    # When the job started, for the metrics at the end. The runner starts a Runner.Worker process
+    # for each job, before "Set up job", so its age gives the start the jobs API would, without
+    # the actions: read permission. If it can't be found, the time this step starts instead, a
+    # few seconds late.
+    - id: start
+      shell: bash
+      run: |
+        now=$(date +%s)
+        pid=$$
+        age=
+        while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+          if [ "$(ps -o comm= -p "$pid" 2> /dev/null)" = Runner.Worker ]; then
+            age=$(ps -o etimes= -p "$pid" 2> /dev/null | tr -d ' ')
+            break
+          fi
+          pid=$(ps -o ppid= -p "$pid" 2> /dev/null | tr -d ' ')
+        done
+        if [[ $age =~ ^[0-9]+$ ]]; then
+          echo "epoch=$((now - age))" >> "$GITHUB_OUTPUT"
+        else
+          echo "epoch=$now" >> "$GITHUB_OUTPUT"
+        fi
+
     # Whether to review: not a draft, and not a PR that only holds a decision record, from a branch
     # named adr-<epoch>-... into the default branch, changing nothing outside docs/adr/. Those are discussed on the PR
     # instead (see docs/adr/1792646959-record-architecture-decisions.md in
@@ -103,6 +136,7 @@ runs:
         skip_with_comment() {
           echo "::notice::$1"
           echo run=false >> "$GITHUB_OUTPUT"
+          echo skip=adr >> "$GITHUB_OUTPUT"
           body="$marker
         Claude Code Review skipped: $1"
           id=$(skip_comment_id) || id=
@@ -117,6 +151,7 @@ runs:
         if [ "$draft" = true ] && [ "$EVENT_ACTION" != labeled ]; then
           echo "::notice::Draft pull request: reviewed once it's marked ready, or when the review label is added"
           echo run=false >> "$GITHUB_OUTPUT"
+          echo skip=draft >> "$GITHUB_OUTPUT"
           exit 0
         fi
         # Only against the default branch: against a branch the author pushed, an ADR-only diff
@@ -321,3 +356,85 @@ runs:
         printf '%s\n\n%s\n<sub>%s</sub>' "$body" "$marker" "$line" > "$RUNNER_TEMP/review-comment.md"
         gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/review-comment.md" > /dev/null \
           || echo "::warning::Couldn't add the cost line to the review comment"
+
+    # The run's metrics, to Datadog, when there's an API key. Last, so the total includes every
+    # step; the post-job cleanup after it isn't included. Skips (drafts and decision records) send
+    # the run and its time only: no zeros for Claude. Tags: repo, outcome, trigger (auto, label for
+    # a run from a label being added, rerun for a re-run) and model. The cost is the same estimate
+    # as the cost line. The key only goes to this step, and to curl on stdin, so it isn't in the
+    # process list. This never fails the job.
+    - if: always() && inputs.datadog-api-key != ''
+      shell: bash
+      env:
+        DD_API_KEY: ${{ inputs.datadog-api-key }}
+        DD_SITE: ${{ inputs.datadog-site }}
+        JOB_START: ${{ steps.start.outputs.epoch }}
+        RUN: ${{ steps.scope.outputs.run }}
+        SKIP: ${{ steps.scope.outputs.skip }}
+        REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+        EVENT_ACTION: ${{ github.event.action }}
+        MODEL: ${{ inputs.model }}
+      run: |
+        # Only a known site, so the key can't be sent anywhere else.
+        case $DD_SITE in
+          datadoghq.com | us3.datadoghq.com | us5.datadoghq.com | datadoghq.eu | ap1.datadoghq.com | ap2.datadoghq.com | ddog-gov.com) ;;
+          *) echo "::warning::datadog-site isn't a Datadog site, so no metrics were sent"; exit 0 ;;
+        esac
+        if ! [[ $DD_API_KEY =~ ^[A-Za-z0-9]+$ ]]; then
+          echo "::warning::datadog-api-key isn't a Datadog API key, so no metrics were sent"
+          exit 0
+        fi
+
+        now=$(date +%s)
+        [[ $JOB_START =~ ^[0-9]+$ ]] || JOB_START=$now
+        total=$((now - JOB_START))
+
+        # not_started: the review never ran, as an earlier step failed or the run was cancelled.
+        if [ "$RUN" = false ]; then
+          outcome=skipped_${SKIP:-other}
+        elif [ "$RUN" = true ] && [[ $REVIEW_OUTCOME =~ ^(success|failure|cancelled)$ ]]; then
+          outcome=$REVIEW_OUTCOME
+        else
+          outcome=not_started
+        fi
+        if [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+          trigger=rerun
+        elif [ "$EVENT_ACTION" = labeled ]; then
+          trigger=label
+        else
+          trigger=auto
+        fi
+
+        stats=
+        if [ "$RUN" = true ] && [ -n "$EXECUTION_FILE" ]; then
+          stats=$(jq -c '[.[] | select(.type == "result")] | last | select(. != null)
+            | {cost: .total_cost_usd, ms: .duration_ms, usage: (.usage // {})}' "$EXECUTION_FILE" 2> /dev/null) || stats=
+        fi
+
+        tags=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg outcome "$outcome" --arg trigger "$trigger" --arg model "$MODEL" \
+          '["repo:\($repo)", "outcome:\($outcome)", "trigger:\($trigger)", "model:\($model)"]')
+        args=(--arg p github.actions.claude_review --argjson ts "$now" --argjson total "$total"
+          --argjson tags "$tags" --argjson stats "${stats:-null}")
+        # Counts: the run, and its tokens by type. Summed across runs.
+        series=$(jq -nc "${args[@]}" '
+          def count($name; $v; $t): {metric: "\($p).\($name)", type: 1, points: [{timestamp: $ts, value: $v}], tags: $t};
+          {series: ([count("runs"; 1; $tags)] + if $stats == null then [] else
+            [["input", $stats.usage.input_tokens], ["output", $stats.usage.output_tokens],
+             ["cache_write", $stats.usage.cache_creation_input_tokens], ["cache_read", $stats.usage.cache_read_input_tokens]]
+            | map(select(.[1] | type == "number") | count("tokens"; .[1]; $tags + ["token_type:\(.[0])"])) end)}')
+        # Distributions: per-run values, for sum, count, average and max. Times in seconds.
+        dists=$(jq -nc "${args[@]}" '
+          def dist($name; $v): {metric: "\($p).\($name)", points: [[$ts, [$v]]], tags: $tags};
+          {series: ([dist("duration.total"; $total)] + if $stats == null then [] else
+            [(select($stats.ms | type == "number") | dist("duration.claude"; $stats.ms / 1000)),
+             (select($stats.cost | type == "number") | dist("cost_usd"; $stats.cost))] end)}')
+
+        send() {
+          printf 'header = "DD-API-KEY: %s"\n' "$DD_API_KEY" \
+            | curl -fsS --max-time 20 --config - -H 'Content-Type: application/json' \
+              --data-binary "$2" "https://api.$DD_SITE$1" > /dev/null
+        }
+        send /api/v2/series "$series" || echo "::warning::Couldn't send the run count and tokens to Datadog"
+        send /api/v1/distribution_points "$dists" || echo "::warning::Couldn't send the run's time and cost to Datadog"
+        echo "::notice::Metrics for Datadog: $outcome, $trigger, ${total}s in all"
