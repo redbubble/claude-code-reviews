@@ -206,6 +206,7 @@ Articore's Datadog site, US1 (`api.datadoghq.com`).
 | --- | --- | --- |
 | `github.actions.claude_review.runs` | count | 1 per run |
 | `github.actions.claude_review.duration.total` | distribution | Seconds from the job's start to the end of the last step |
+| `github.actions.claude_review.billed_minutes` | count | The runner minutes GitHub bills for the job, estimated |
 | `github.actions.claude_review.duration.claude` | distribution | Seconds Claude spent on the review |
 | `github.actions.claude_review.cost_usd` | distribution | The review's cost, the same estimate as the cost line |
 | `github.actions.claude_review.tokens` | count | Tokens, by `token_type`: `input`, `output`, `cache_write`, `cache_read` |
@@ -213,9 +214,11 @@ Articore's Datadog site, US1 (`api.datadoghq.com`).
 Every metric is tagged with `repo`, `model`, `trigger` (`auto`, `label` for a run from a label
 being added, or `rerun`) and `outcome`: `success`, `failure`, `cancelled`, `not_started` (an
 earlier step failed or the run was cancelled before the review started), `skipped_draft` or
-`skipped_adr`. Skipped runs send `runs` and `duration.total` only. The time spent outside the
-review is `duration.total` minus `duration.claude`. The total leaves out the post-job cleanup
-after the last step, usually a few seconds.
+`skipped_adr`. Skipped runs send `runs`, `duration.total` and `billed_minutes` only. The time
+spent outside the review is `duration.total` minus `duration.claude`. The total leaves out the post-job cleanup
+after the last step, usually 2 to 4 seconds. GitHub bills each job in whole minutes, rounded up,
+so `billed_minutes` adds 3 seconds to the total before rounding up. It's a minute short for a job
+that ends within a few seconds of a minute, and right for the rest.
 
 A review that fails after Claude returns a result, such as running out of turns, still sends its
 cost, time and tokens, tagged `outcome:failure`. Runs cancelled during the review, or that fail
