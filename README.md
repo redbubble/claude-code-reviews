@@ -217,8 +217,10 @@ earlier step failed or the run was cancelled before the review started), `skippe
 review is `duration.total` minus `duration.claude`. The total leaves out the post-job cleanup
 after the last step, usually a few seconds.
 
-Runs that are cancelled or fail during the review send no cost, though Anthropic still charges for
-them. For the real cost of all reviews, see the API key's usage in the Anthropic Console.
+A review that fails after Claude returns a result, such as running out of turns, still sends its
+cost, time and tokens, tagged `outcome:failure`. Runs cancelled during the review, or that fail
+before Claude returns a result, send no cost, though Anthropic still charges for them. For the
+real cost of all reviews, see the API key's usage in the Anthropic Console.
 
 ### Resolving or minimising earlier findings
 
