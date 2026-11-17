@@ -379,6 +379,10 @@ runs:
         now=$(date +%s)
         [[ $JOB_START =~ ^[0-9]+$ ]] || JOB_START=$now
         total=$((now - JOB_START))
+        # GitHub bills each job in whole minutes, rounded up. The job ends after this step: the
+        # post-job cleanup takes 2-4 seconds more, so add 3. Off by a minute at most, for a job
+        # that ends within a few seconds of a minute.
+        billed=$(((total + 3 + 59) / 60))
 
         # not_started: the review never ran, as an earlier step failed or the run was cancelled.
         if [ "$RUN" = false ]; then
@@ -404,12 +408,12 @@ runs:
 
         tags=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg outcome "$outcome" --arg trigger "$trigger" --arg model "$MODEL" \
           '["repo:\($repo)", "outcome:\($outcome)", "trigger:\($trigger)", "model:\($model)"]')
-        args=(--arg p github.actions.claude_review --argjson ts "$now" --argjson total "$total"
+        args=(--arg p github.actions.claude_review --argjson ts "$now" --argjson total "$total" --argjson billed "$billed"
           --argjson tags "$tags" --argjson stats "${stats:-null}")
-        # Counts: the run, and its tokens by type. Summed across runs.
+        # Counts: the run, its billed minutes, and its tokens by type. Summed across runs.
         series=$(jq -nc "${args[@]}" '
           def count($name; $v; $t): {metric: "\($p).\($name)", type: 1, points: [{timestamp: $ts, value: $v}], tags: $t};
-          {series: ([count("runs"; 1; $tags)] + if $stats == null then [] else
+          {series: ([count("runs"; 1; $tags), count("billed_minutes"; $billed; $tags)] + if $stats == null then [] else
             [["input", $stats.usage.input_tokens], ["output", $stats.usage.output_tokens],
              ["cache_write", $stats.usage.cache_creation_input_tokens], ["cache_read", $stats.usage.cache_read_input_tokens]]
             | map(select(.[1] | type == "number") | count("tokens"; .[1]; $tags + ["token_type:\(.[0])"])) end)}')
