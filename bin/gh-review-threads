@@ -113,7 +113,7 @@ case "${1:-}" in
   resolve)
     [ $# -eq 2 ] || usage
     check_thread "$2"
-    # Resolving needs contents: write, which the README makes opt-in. Without it, hide
+    # Resolving needs contents: write, which docs/configuration.md makes opt-in. Without it, hide
     # the thread's first comment as resolved instead; any other failure is reported as it is.
     if ! result=$(gh api graphql -f id="$2" -f query='
       mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }' \

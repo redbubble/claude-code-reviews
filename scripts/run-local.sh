@@ -157,7 +157,7 @@ if [ -z "${GH_TOKEN:-}" ]; then
 fi
 
 if [ -z "${ATLASSIAN_READ_TOKEN:-}" ]; then
-  warn "ATLASSIAN_READ_TOKEN isn't set: the review can't read Jira issues or Confluence pages (see the README)"
+  warn "ATLASSIAN_READ_TOKEN isn't set: the review can't read Jira issues or Confluence pages (see docs/local-reviews.md)"
 fi
 
 # CLAUDE_REVIEW_MODEL if set, else the action's default, as in CI.
