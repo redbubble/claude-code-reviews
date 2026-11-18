@@ -68,7 +68,8 @@ Pull requests that only hold an architecture decision record aren't reviewed: th
 the PR instead. A PR counts as one when its branch name starts with `adr-`, it's against the
 repository's default branch, and every file it changes, including a renamed file's old name, is
 under `docs/adr/`. Any other change from an `adr-` branch is reviewed as usual. A PR the review
-skips still passes the `claude-review` check, so a required check doesn't block it. So the pass
+skips still passes the `claude-review` check (`claude-review / review` with the
+[reusable workflow](#the-reusable-workflow-redbubble-only)), so a required check doesn't block it. So the pass
 isn't mistaken for a review, the skip also posts one comment on the PR saying why. Later skips
 update that comment rather than adding another, and it stays after a review runs, as a record of
 the skip. A skipped draft gets no comment: it's reviewed once it's marked ready.
@@ -141,7 +142,9 @@ We keep the action working with every rules version, so most repositories leave 
 `master` and pin the rules instead.
 
 Either way, the actions this one uses are pinned to commit SHAs in `action.yml`, so a pinned
-commit of this action always runs the same code.
+commit of this action always runs the same code. Pinning the
+[reusable workflow](#the-reusable-workflow-redbubble-only) doesn't do this: it calls the action
+at `master` whatever commit of it you use.
 
 ### Pinning the rules
 
@@ -244,6 +247,53 @@ from another repository) could leak the token while the job runs.
 To switch, change `contents: read` to `contents: write`. Keep `contents: read` if branch
 protection doesn't require resolved conversations, or if a leaked token's push access matters
 more to you than clicking *Resolve* on fixed threads.
+
+### The reusable workflow (redbubble only)
+
+The workflow in [Usage](#usage) is what we recommend everywhere. A repository in the **redbubble**
+organisation can instead call [`review.yml`](.github/workflows/review.yml), a reusable workflow
+that holds the job: its runner, timeout, concurrency and which secrets the review uses. A change
+to any of those, like adding a new secret, then reaches the repository without a pull request
+there. The job in your workflow becomes:
+
+```yaml
+jobs:
+  claude-review:
+    uses: redbubble/claude-code-reviews/.github/workflows/review.yml@master
+    secrets: inherit
+    with:                   # optional: the inputs in the sections above
+      model: claude-sonnet-5-5
+```
+
+Keep your `on:` and `permissions:` blocks: the permissions are the most the job's token gets.
+The label trigger in [Reviewing only when asked](#reviewing-only-when-asked) works the same way,
+with its `if:` next to `uses:`.
+
+Before you switch:
+
+- **It's for redbubble repositories.** GitHub only passes secrets with `secrets: inherit` to a
+  reusable workflow in the same organisation, or the same enterprise, which we don't have. A
+  teepublic repository can still call it by listing each secret under `secrets:`, but then a new
+  secret needs a pull request there anyway, and it gains little over the step. We recommend the
+  step so a repository is set up the same way whichever organisation it's in: see
+  redbubble/claude-code-reviews-rules' decision record on this.
+- **`secrets: inherit` passes every secret the repository can read**, not only the review's.
+  `review.yml` hands the action only the ones it uses, but a change to `review.yml` on `master`
+  could read the rest. To pass only the review's, list them instead:
+
+  ```yaml
+      secrets:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+        ATLASSIAN_CLIENT_SECRET: ${{ secrets.ATLASSIAN_CLIENT_SECRET }}
+        DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+  ```
+
+- **The check is named `claude-review / review`**: your job, then the job in `review.yml`. If
+  `claude-review` is a required check, rename it in the branch protection rule or ruleset in the
+  same change, or pull requests wait for a check that never reports.
+- **It can't be pinned.** `review.yml@<SHA>` fixes the job, but it calls the action at `master`.
+  To [pin the logic](#pinning-the-logic), call the action as a step.
 
 ## How it works
 
@@ -432,6 +482,7 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | Path | Purpose |
 | --- | --- |
 | `action.yml` | The action: decides whether to review, gets the tokens, checks out the rules and runs Claude. |
+| `.github/workflows/review.yml` | An optional reusable workflow for redbubble repositories: the job that runs the action, with its runner, timeout, concurrency and secrets. |
 | `bin/gh` | Wraps `gh` on Claude's PATH: keeps `gh pr` and `gh issue` to the repository under review, and `--jq` away from the environment. |
 | `bin/gh-read` | `gh api` for other repositories, with the right organisation's read-only token, and for public repositories anywhere on GitHub. |
 | `bin/atlassian-read` | Reads one Jira issue or Confluence page, as text, with the review's read-only Atlassian token. |
@@ -449,6 +500,8 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
   repositories, and the action refuses to run in a public one (see
   [Security notes](#security-notes)). To have Claude review a change, run a
   [local review](#local-reviews) on its branch.
+- Keep the defaults of `review.yml`'s inputs the same as `action.yml`'s: the workflow always
+  passes them, so its defaults are the ones that apply.
 - Keep the action working with every rules version a repository may have pinned. Add helpers and
   inputs; don't remove or change them under rules that use them.
 - Claude can only run a new helper in `bin/` once it's in `--allowedTools` in `action.yml`. Check
@@ -519,7 +572,9 @@ Dependabot runs can't read Actions secrets, so without them the review fails on 
 
 If an organisation restricts which actions can run (*Settings → Actions → General*), allow
 `redbubble/claude-code-reviews`, `anthropics/claude-code-action`,
-`actions/create-github-app-token` and `actions/checkout`.
+`actions/create-github-app-token` and `actions/checkout`. Repositories using the
+[reusable workflow](#the-reusable-workflow-redbubble-only) also need
+`redbubble/claude-code-reviews/.github/workflows/review.yml` allowed.
 
 ### 5. Atlassian service account
 
