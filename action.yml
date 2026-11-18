@@ -3,8 +3,9 @@ description: Reviews a pull request with Claude Code, against Articore's review 
 author: Articore
 
 # The calling job sets the triggers, permissions, timeout and concurrency: a composite action
-# can't. See the README for the workflow to copy. Rules come from the private
-# redbubble/claude-code-reviews-rules at run time, the helpers in bin/ from this action.
+# can't. Repositories usually get that job from .github/workflows/review.yml; see the README.
+# Rules come from the private redbubble/claude-code-reviews-rules at run time, the helpers in bin/
+# from this action.
 #
 # Every action used here gets this repository's secrets, so each is pinned to a full commit SHA,
 # with its version alongside: a moved tag can't change the code they run with, and a consumer that

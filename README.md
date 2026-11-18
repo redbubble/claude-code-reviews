@@ -26,19 +26,29 @@ permissions:
 
 jobs:
   claude-review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: claude-review-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
-    steps:
-      - uses: redbubble/claude-code-reviews@master
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          app-private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
-          atlassian-client-secret: ${{ secrets.ATLASSIAN_CLIENT_SECRET }}
-          datadog-api-key: ${{ secrets.DATADOG_API_KEY }}
+    uses: redbubble/claude-code-reviews/.github/workflows/review.yml@master
+    secrets: inherit
 ```
+
+This calls [`review.yml`](.github/workflows/review.yml), a reusable workflow that runs the action
+in a job of its own. The job's runner, timeout and concurrency, and which secrets the review
+uses, are set there, so a change to them doesn't need a pull request in every repository. Your
+workflow sets only the triggers and the permissions, which are the most the job's token gets.
+
+`secrets: inherit` passes every secret the repository can read, not only the ones the review
+uses. To pass only those, list them instead:
+
+```yaml
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+      ATLASSIAN_CLIENT_SECRET: ${{ secrets.ATLASSIAN_CLIENT_SECRET }}
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+```
+
+A secret the review starts using later then needs adding here too.
+
+The check this adds is named `claude-review / review`: your job, then the job in `review.yml`.
 
 Then:
 
@@ -61,6 +71,22 @@ they're marked ready, unless the run comes from a label being added (see
 [Reviewing only when asked](#reviewing-only-when-asked)).
 
 This relies on the one-time setup in [CI Bootstrapping](#ci-bootstrapping).
+
+### Moving from the action step
+
+Repositories set up before `review.yml` call the action as a step, in a job with its own runner,
+timeout, concurrency and a `with:` line per secret. That keeps working: `action.yml` hasn't
+changed. To move to the workflow in [Usage](#usage):
+
+1. Replace the job with the one in Usage. Keep your `on:` and `permissions:` blocks. Move
+   `model`, `max-findings` and `rules-ref`, if you set them, to a `with:` block on the job (see
+   [Configuring the workflow](#configuring-the-workflow)).
+2. If `claude-review` is a required check, change it to `claude-review / review` in the branch
+   protection rule or ruleset, in the same change. Until then, pull requests wait for a
+   `claude-review` check that never reports.
+
+A repository that pins the action to a commit should stay on the step: see
+[Pinning the logic](#pinning-the-logic).
 
 ### Pull requests that aren't reviewed
 
@@ -117,28 +143,48 @@ on:
 jobs:
   claude-review:
     if: github.event.label.name == 'claude-review'
-    # ...the rest of the job as in Usage
+    uses: redbubble/claude-code-reviews/.github/workflows/review.yml@master
+    secrets: inherit
 ```
 
 Add the `claude-review` label to a pull request to review it, draft or not. To review a later
 push, remove the label and add it again. The `if:` matters: without it, adding any other label
 starts a job that cancels a review in progress.
 
-Don't make the `claude-review` check required with this workflow. GitHub counts a job its `if:`
+Don't make the `claude-review / review` check required with this workflow. GitHub counts a job its `if:`
 skips as passed, so adding any other label to a pull request passes the check without a review.
 A required check needs the default triggers in [Usage](#usage), where every push is reviewed.
 
 ### Pinning the logic
 
-`@master` runs the latest action on every review. To choose when the action changes, use a full
-40-character commit SHA from this repository's `master` instead:
+The workflow in [Usage](#usage) runs the latest action on every review. To choose when the action
+changes, don't pin `review.yml`: it calls the action at `master` whatever commit of it you use,
+so `review.yml@<SHA>` would fix the job around the action but not the action. Call the action as
+a step instead, pinned to a full 40-character commit SHA from this repository's `master`:
 
 ```yaml
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
       - uses: redbubble/claude-code-reviews@0123456789abcdef0123456789abcdef01234567
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          app-private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+          atlassian-client-secret: ${{ secrets.ATLASSIAN_CLIENT_SECRET }}
+          datadog-api-key: ${{ secrets.DATADOG_API_KEY }}
 ```
 
-We keep the action working with every rules version, so most repositories leave this on
-`master` and pin the rules instead.
+The inputs in this section go in the step's `with:` block, next to the secrets. A pinned
+repository maintains this job itself: when the review needs a new secret or a longer timeout,
+it changes its own workflow, as it updates the SHA.
+
+We keep the action working with every rules version, so most repositories use the workflow in
+Usage and pin the rules instead.
 
 Either way, the actions this one uses are pinned to commit SHAs in `action.yml`, so a pinned
 commit of this action always runs the same code.
@@ -150,9 +196,10 @@ applies everywhere on the next review. To choose when your repository takes new 
 commit with `rules-ref`:
 
 ```yaml
-        with:
-          # ...the inputs as in Usage
-          rules-ref: 0123456789abcdef0123456789abcdef01234567  # review baseline v0.11
+  claude-review:
+    # ...uses and secrets as in Usage
+    with:
+      rules-ref: 0123456789abcdef0123456789abcdef01234567  # review baseline v0.11
 ```
 
 Use the merge commit on `master` of the baseline version you want: the version is in the title of
@@ -169,9 +216,10 @@ and nothing tells it a newer version exists.
 The review uses `claude-opus-5-5`. To use another model, add `model` with a model ID:
 
 ```yaml
-        with:
-          # ...the inputs as in Usage
-          model: claude-sonnet-5-5
+  claude-review:
+    # ...uses and secrets as in Usage
+    with:
+      model: claude-sonnet-5-5
 ```
 
 The value is pasted into `claude_args`, which the action splits into separate flags, so the
@@ -186,9 +234,10 @@ first and are always posted, even past the limit; the rest fill what's left, mos
 first. The summary says how many were left out. To set your own limit, add `max-findings`:
 
 ```yaml
-        with:
-          # ...the inputs as in Usage
-          max-findings: 8
+  claude-review:
+    # ...uses and secrets as in Usage
+    with:
+      max-findings: 8
 ```
 
 It must be a number from 1 to 999, and it's a hard limit: Important findings still come first,
@@ -198,8 +247,8 @@ up to v0.14 ignore it and cap Nits at 5 instead. For local reviews, set
 
 ### Metrics in Datadog
 
-With `datadog-api-key` (as in Usage), every run sends metrics to Datadog at the end of the job,
-including runs that skip a draft or a decision record. Without it, none are sent. They go to
+With the `DATADOG_API_KEY` secret (as in Usage), every run sends metrics to Datadog at the end of
+the job, including runs that skip a draft or a decision record. Without it, none are sent. They go to
 Articore's Datadog site, US1 (`api.datadoghq.com`).
 
 | Metric | Type | What it is |
@@ -432,6 +481,7 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
 | Path | Purpose |
 | --- | --- |
 | `action.yml` | The action: decides whether to review, gets the tokens, checks out the rules and runs Claude. |
+| `.github/workflows/review.yml` | The reusable workflow repositories call: the job that runs the action, with its runner, timeout, concurrency and secrets. |
 | `bin/gh` | Wraps `gh` on Claude's PATH: keeps `gh pr` and `gh issue` to the repository under review, and `--jq` away from the environment. |
 | `bin/gh-read` | `gh api` for other repositories, with the right organisation's read-only token, and for public repositories anywhere on GitHub. |
 | `bin/atlassian-read` | Reads one Jira issue or Confluence page, as text, with the review's read-only Atlassian token. |
@@ -449,6 +499,8 @@ raw GraphQL and `gh pr edit`, which can change anything about the PR):
   repositories, and the action refuses to run in a public one (see
   [Security notes](#security-notes)). To have Claude review a change, run a
   [local review](#local-reviews) on its branch.
+- Keep the defaults of `review.yml`'s inputs the same as `action.yml`'s: the workflow always
+  passes them, so its defaults are the ones that apply.
 - Keep the action working with every rules version a repository may have pinned. Add helpers and
   inputs; don't remove or change them under rules that use them.
 - Claude can only run a new helper in `bin/` once it's in `--allowedTools` in `action.yml`. Check
@@ -519,7 +571,8 @@ Dependabot runs can't read Actions secrets, so without them the review fails on 
 
 If an organisation restricts which actions can run (*Settings → Actions → General*), allow
 `redbubble/claude-code-reviews`, `anthropics/claude-code-action`,
-`actions/create-github-app-token` and `actions/checkout`.
+`actions/create-github-app-token` and `actions/checkout`, and the reusable workflow
+`redbubble/claude-code-reviews/.github/workflows/review.yml`.
 
 ### 5. Atlassian service account
 
@@ -561,9 +614,12 @@ For `atlassian-read`. An Atlassian organisation admin sets this up in admin.atla
   read on a public repository. So the action fails the job in a public repository before it
   makes any token or starts Claude, even if the secrets have been made available there.
 - **Every repository passes its secrets to this action.** Anyone who can push to `master` here
-  can read them in every repository that follows `master`. `master` is protected: every change
-  needs a pull request approved by a code owner, with no bypass. A repository that needs more
-  control can [pin the logic](#pinning-the-logic) to a commit it has read.
+  can read them in every repository that follows `master`. With `secrets: inherit` that's every
+  secret the repository can read, not only the review's: `review.yml` hands the action only the
+  ones it uses, but a change to `review.yml` could read the rest. `master` is protected: every
+  change needs a pull request approved by a code owner, with no bypass. A repository that needs
+  more control can list the secrets it passes (see [Usage](#usage)), or
+  [pin the logic](#pinning-the-logic) to a commit it has read.
 - **The actions this one uses are pinned to commit SHAs.** `actions/checkout`,
   `actions/create-github-app-token` and `anthropics/claude-code-action` all run with the
   secrets. A tag such as `@v1` can be moved to other code by whoever controls that repository,
