@@ -74,6 +74,10 @@ isn't mistaken for a review, the skip also posts one comment on the PR saying wh
 update that comment rather than adding another, and it stays after a review runs, as a record of
 the skip. A skipped draft gets no comment: it's reviewed once it's marked ready.
 
+Pull requests Dependabot opens aren't reviewed either, unless the repository sets
+`review-dependabot` (see [Reviewing Dependabot pull requests](#reviewing-dependabot-pull-requests))
+or someone adds the review label. They also pass the check, with no comment.
+
 ### A repository's own rules
 
 A `REVIEW.md` at the repository root adds rules for that repository on top of the baseline, and
@@ -199,10 +203,48 @@ but no more than that are posted, even when that leaves some Important ones out.
 up to v0.14 ignore it and cap Nits at 5 instead. For local reviews, set
 `CLAUDE_REVIEW_MAX_FINDINGS`.
 
+### Reviewing Dependabot pull requests
+
+Pull requests Dependabot opens are skipped by default. Most only change a version and a lockfile:
+the repository's tests say more about an update than a review can, and a long lockfile diff
+still costs a full review. To review them, add `review-dependabot`:
+
+```yaml
+        with:
+          # ...the inputs as in Usage
+          review-dependabot: true
+```
+
+Dependabot's runs only get the secrets added under *Secrets and variables → Dependabot*, not the
+Actions secrets, so add the review's there too (see
+[CI Bootstrapping](#3-add-the-secrets-to-both-organisations)). Without them, every Dependabot
+review fails.
+
+To review one Dependabot pull request without the input, add the `claude-review` label, with the
+`labeled` trigger from [Reviewing only when asked](#reviewing-only-when-asked) added to your
+`on:` types. That run is started by whoever added the label, so it gets the Actions secrets and
+needs none under Dependabot. To review it again after a push, remove the label and add it again.
+
+Either way, fewer, larger Dependabot pull requests cost less to review and to test. Group them in
+the repository's `.github/dependabot.yml`, for example every minor and patch update in one
+weekly pull request:
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: bundler   # or npm, pip, github-actions, ...
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+```
+
 ### Metrics in Datadog
 
 With `datadog-api-key` (as in Usage), every run sends metrics to Datadog at the end of the job,
-including runs that skip a draft or a decision record. Without it, none are sent. They go to
+including runs that skip a draft, a Dependabot pull request or a decision record. Without it, none are sent. They go to
 Articore's Datadog site, US1 (`api.datadoghq.com`).
 
 | Metric | Type | What it is |
@@ -216,8 +258,10 @@ Articore's Datadog site, US1 (`api.datadoghq.com`).
 
 Every metric is tagged with `repo`, `model`, `trigger` (`auto`, `label` for a run from a label
 being added, or `rerun`) and `outcome`: `success`, `failure`, `cancelled`, `not_started` (an
-earlier step failed or the run was cancelled before the review started), `skipped_draft` or
-`skipped_adr`. Skipped runs send `runs`, `duration.total` and `billed_minutes` only. The time
+earlier step failed or the run was cancelled before the review started), `skipped_draft`,
+`skipped_dependabot` or `skipped_adr`. Once the pull request has been read, they're also tagged
+with `author_type`, `bot` or `human`, for who opened it, and, for a bot, `bot` with its name
+without `[bot]`, such as `bot:dependabot`. A human's login isn't sent. Skipped runs send `runs`, `duration.total` and `billed_minutes` only. The time
 spent outside the review is `duration.total` minus `duration.claude`. The total leaves out the post-job cleanup
 after the last step, usually 2 to 4 seconds. GitHub bills each job in whole minutes, rounded up,
 so `billed_minutes` adds 3 seconds to the total before rounding up. It's a minute short for a job
@@ -565,8 +609,10 @@ New organization secret*:
 For *Repository access*, choose the repositories that use the review (or all private
 repositories).
 
-To review Dependabot PRs too, add both again under *Secrets and variables → Dependabot*.
-Dependabot runs can't read Actions secrets, so without them the review fails on every Dependabot PR.
+Repositories that set `review-dependabot` also need the secrets under *Secrets and variables →
+Dependabot*: Dependabot's runs can't read Actions secrets, so without them every Dependabot review
+fails. Dependabot pull requests are skipped by default, and a review asked for with the label
+uses the Actions secrets (see [Reviewing Dependabot pull requests](#reviewing-dependabot-pull-requests)).
 
 ### 4. Allow the actions
 

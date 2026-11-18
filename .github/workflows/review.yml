@@ -36,6 +36,13 @@ on:
         type: string
         required: false
         default: master
+      review-dependabot:
+        description: >-
+          true to review pull requests Dependabot opens, which are skipped by default. Needs the
+          review's secrets under Dependabot.
+        type: boolean
+        required: false
+        default: false
     # With `secrets: inherit` these come from the calling repository without being listed. They're
     # declared so a repository can also pass them one by one.
     secrets:
@@ -65,3 +72,4 @@ jobs:
           model: ${{ inputs.model }}
           max-findings: ${{ inputs.max-findings }}
           rules-ref: ${{ inputs.rules-ref }}
+          review-dependabot: ${{ inputs.review-dependabot }}

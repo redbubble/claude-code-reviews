@@ -54,6 +54,13 @@ inputs:
       metrics are sent. It never reaches Claude.
     required: false
     default: ''
+  review-dependabot:
+    description: >-
+      true to review pull requests Dependabot opens, which are skipped by default. Dependabot's
+      runs only get the secrets added under Dependabot, so add the review's there too. A run from
+      the review label being added reviews them either way.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -81,15 +88,18 @@ runs:
           echo "epoch=$now" >> "$GITHUB_OUTPUT"
         fi
 
-    # Whether to review: not a draft, and not a PR that only holds a decision record, from a branch
-    # named adr-<epoch>-... into the default branch, changing nothing outside docs/adr/. Those are discussed on the PR
-    # instead (see docs/adr/1792646959-record-architecture-decisions.md in
-    # redbubble/claude-code-reviews-rules). A draft is reviewed when the run comes from a label
-    # being added: someone asked for it. Skipped steps leave the job passing, so a required check
-    # is satisfied. The draft state, visibility and changed files are read from GitHub when the step
-    # runs, never from the event: a re-run replays the event as it was when the run was created, so
-    # a run from while the PR was a draft would otherwise skip again after it's marked ready. A decision-record skip also says why in one PR comment, updated rather than
-    # repeated; a draft doesn't, as it's reviewed once it's ready. A public repository fails the
+    # Whether to review: not a draft, not opened by Dependabot (unless review-dependabot is true), and
+    # not a PR that only holds a decision record, from a branch named adr-<epoch>-... into the default
+    # branch, changing nothing outside docs/adr/. Those are discussed on the PR instead (see
+    # docs/adr/1792646959-record-architecture-decisions.md in redbubble/claude-code-reviews-rules). A
+    # draft is reviewed when the run comes from a label being added: someone asked for it, and so is a
+    # Dependabot PR. Skipped steps leave the job passing, so a required check is satisfied. The draft
+    # state, visibility and changed files are read from GitHub when the step runs, never from the
+    # event: a re-run replays the event as it was when the run was created, so a run from while the PR
+    # was a draft would otherwise skip again after it's marked ready. The author is read with them,
+    # for the metrics' author_type and bot tags. A decision-record skip also says why in one PR
+    # comment, updated rather than repeated; a draft doesn't, as it's reviewed once it's ready, and
+    # nor does a Dependabot PR, as the skip is the repository's choice. A public repository fails the
     # job instead, before any token is made: the review reads private repositories, Jira and
     # Confluence, and anyone could read what it posts there.
     - id: scope
@@ -99,9 +109,15 @@ runs:
         PR: ${{ github.event.pull_request.number }}
         EVENT_ACTION: ${{ github.event.action }}
         HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        REVIEW_DEPENDABOT: ${{ inputs.review-dependabot }}
       run: |
         if [ -z "$PR" ]; then
           echo "::error::The review only runs on pull_request events"
+          exit 1
+        fi
+        # Fail on a typo rather than review, or skip, what the repository didn't choose.
+        if ! [[ $REVIEW_DEPENDABOT =~ ^(true|false)$ ]]; then
+          echo "::error::review-dependabot isn't true or false"
           exit 1
         fi
         # If either can't be read, fail rather than skip: a skip passes the check.
@@ -115,11 +131,21 @@ runs:
           echo "::error::The review only runs in private repositories: it reads private code, Jira and Confluence, and posts what it finds on the pull request"
           exit 1
         fi
-        pr_state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '"\(.draft) \(.changed_files) \(.base.ref)"') || {
+        pr_state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
+          --jq '"\(.draft) \(.changed_files) \(.base.ref) \(.user.type) \(.user.login)"') || {
           echo "::error::Couldn't read pull request #$PR"
           exit 1
         }
-        read -r draft changed_files base_ref <<<"$pr_state"
+        read -r draft changed_files base_ref author_type author <<<"$pr_state"
+        # For the metrics: bot or human, and which bot, without the [bot] suffix. A human's login
+        # isn't sent: it would put a name on the cost, and add a tag value per person.
+        if [ "$author_type" = Bot ]; then
+          echo author_type=bot >> "$GITHUB_OUTPUT"
+          bot=${author%\[bot\]}
+          [[ $bot =~ ^[A-Za-z0-9-]+$ ]] && echo "bot=$bot" >> "$GITHUB_OUTPUT"
+        else
+          echo author_type=human >> "$GITHUB_OUTPUT"
+        fi
 
         marker='<!-- claude-code-review-skipped -->'
         comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
@@ -148,6 +174,12 @@ runs:
           echo "::notice::Draft pull request: reviewed once it's marked ready, or when the review label is added"
           echo run=false >> "$GITHUB_OUTPUT"
           echo skip=draft >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "$author" = 'dependabot[bot]' ] && [ "$REVIEW_DEPENDABOT" != true ] && [ "$EVENT_ACTION" != labeled ]; then
+          echo "::notice::Opened by Dependabot: reviewed when the review label is added, or always with review-dependabot: true"
+          echo run=false >> "$GITHUB_OUTPUT"
+          echo skip=dependabot >> "$GITHUB_OUTPUT"
           exit 0
         fi
         # Only against the default branch: against a branch the author pushed, an ADR-only diff
@@ -354,9 +386,10 @@ runs:
           || echo "::warning::Couldn't add the cost line to the review comment"
 
     # The run's metrics, to Datadog (US1, api.datadoghq.com), when there's an API key. Last, so
-    # the total includes every step; the post-job cleanup after it isn't included. Skips (drafts and decision records) send
-    # the run and its time only: no zeros for Claude. Tags: repo, outcome, trigger (auto, label for
-    # a run from a label being added, rerun for a re-run) and model. The cost is the same estimate
+    # the total includes every step; the post-job cleanup after it isn't included. Skips (drafts, Dependabot PRs and
+    # decision records) send the run and its time only: no zeros for Claude. Tags: repo, outcome,
+    # trigger (auto, label for a run from a label being added, rerun for a re-run), model, and,
+    # once the pull request has been read, author_type (bot or human) and bot (which one). The cost is the same estimate
     # as the cost line. The key only goes to this step, and to curl on stdin, so it isn't in the
     # process list. This never fails the job.
     - if: always() && inputs.datadog-api-key != ''
@@ -366,6 +399,8 @@ runs:
         JOB_START: ${{ steps.start.outputs.epoch }}
         RUN: ${{ steps.scope.outputs.run }}
         SKIP: ${{ steps.scope.outputs.skip }}
+        AUTHOR_TYPE: ${{ steps.scope.outputs.author_type }}
+        BOT: ${{ steps.scope.outputs.bot }}
         REVIEW_OUTCOME: ${{ steps.review.outcome }}
         EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
         EVENT_ACTION: ${{ github.event.action }}
@@ -407,7 +442,10 @@ runs:
         fi
 
         tags=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg outcome "$outcome" --arg trigger "$trigger" --arg model "$MODEL" \
-          '["repo:\($repo)", "outcome:\($outcome)", "trigger:\($trigger)", "model:\($model)"]')
+          --arg author_type "$AUTHOR_TYPE" --arg bot "$BOT" \
+          '["repo:\($repo)", "outcome:\($outcome)", "trigger:\($trigger)", "model:\($model)"]
+            + if $author_type == "" then [] else ["author_type:\($author_type)"] end
+            + if $bot == "" then [] else ["bot:\($bot)"] end')
         args=(--arg p github.actions.claude_review --argjson ts "$now" --argjson total "$total" --argjson billed "$billed"
           --argjson tags "$tags" --argjson stats "${stats:-null}")
         # Counts: the run, its billed minutes, and its tokens by type. Summed across runs.
