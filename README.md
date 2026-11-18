@@ -220,10 +220,29 @@ Actions secrets, so add the review's there too (see
 [CI Bootstrapping](#3-add-the-secrets-to-both-organisations)). Without them, every Dependabot
 review fails.
 
-To review one Dependabot pull request without the input, add the `claude-review` label, with the
-`labeled` trigger from [Reviewing only when asked](#reviewing-only-when-asked) added to your
-`on:` types. That run is started by whoever added the label, so it gets the Actions secrets and
-needs none under Dependabot. To review it again after a push, remove the label and add it again.
+To review one Dependabot pull request without the input, add the `claude-review` label. For that,
+the workflow in [Usage](#usage) also needs the `labeled` type, and an `if:` that lets through every
+other event but only that label:
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened, labeled]
+
+jobs:
+  claude-review:
+    if: github.event.action != 'labeled' || github.event.label.name == 'claude-review'
+    # ...the rest of the job as in Usage
+```
+
+Without the `if:`, any label starts a review, including the ones Dependabot adds when it opens a
+pull request, and those runs fail without Dependabot secrets. With only the `if:` from
+[Reviewing only when asked](#reviewing-only-when-asked), nothing else is reviewed. A run from the
+label is started by whoever added it, so it gets the Actions secrets and needs none under
+Dependabot. To review it again after a push, remove the label and add it again.
+
+A Dependabot pull request that someone else has pushed to is reviewed as usual: the skip only
+applies while every commit is Dependabot's own, signed by GitHub.
 
 Either way, fewer, larger Dependabot pull requests cost less to review and to test. Group them in
 the repository's `.github/dependabot.yml`, for example every minor and patch update in one
@@ -244,7 +263,10 @@ updates:
 ### Metrics in Datadog
 
 With `datadog-api-key` (as in Usage), every run sends metrics to Datadog at the end of the job,
-including runs that skip a draft, a Dependabot pull request or a decision record. Without it, none are sent. They go to
+including runs that skip a draft, a Dependabot pull request or a decision record. Without it, none
+are sent. A run Dependabot starts, including one that skips its pull request, only gets the secrets
+under *Dependabot*, so it only sends metrics where `DATADOG_API_KEY` is a Dependabot secret too
+(see [CI Bootstrapping](#3-add-the-secrets-to-both-organisations)). They go to
 Articore's Datadog site, US1 (`api.datadoghq.com`).
 
 | Metric | Type | What it is |
@@ -613,6 +635,10 @@ Repositories that set `review-dependabot` also need the secrets under *Secrets a
 Dependabot*: Dependabot's runs can't read Actions secrets, so without them every Dependabot review
 fails. Dependabot pull requests are skipped by default, and a review asked for with the label
 uses the Actions secrets (see [Reviewing Dependabot pull requests](#reviewing-dependabot-pull-requests)).
+
+To count those skips in Datadog, add `DATADOG_API_KEY` under *Dependabot* as well, for every
+repository that sends metrics. It's the only one a skip needs: it never reaches Claude, and it can
+only send data to Datadog, not read it.
 
 ### 4. Allow the actions
 
