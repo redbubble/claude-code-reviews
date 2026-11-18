@@ -2,12 +2,12 @@
 # sets the triggers and permissions and passes its secrets with `secrets: inherit`. A change to the
 # runner, timeout, concurrency or which secrets the review uses is made here, not in every
 # repository. Optional, and for redbubble repositories only: `secrets: inherit` doesn't reach a
-# workflow in another organisation without an enterprise, so the README recommends the action step
-# everywhere. See "The reusable workflow (redbubble only)" in the README.
+# workflow in another organisation without an enterprise, so docs/configuration.md recommends the
+# action step everywhere. See "The reusable workflow (redbubble only)" there.
 #
 # The action is called at master, not ./: in a called workflow ./ is the calling repository's
 # checkout. So pinning this file to a commit doesn't pin the action. A repository that needs a
-# strict pin calls the action by SHA instead (see Pinning the logic in the README).
+# strict pin calls the action by SHA instead (see Pinning the logic in docs/configuration.md).
 #
 # Permissions aren't set here: the calling workflow's are the most the job gets, and a repository
 # chooses contents: read or write (see Resolving or minimising earlier findings).
