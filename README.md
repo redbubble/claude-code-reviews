@@ -241,6 +241,12 @@ pull request, and those runs fail without Dependabot secrets. With only the `if:
 label is started by whoever added it, so it gets the Actions secrets and needs none under
 Dependabot. To review it again after a push, remove the label and add it again.
 
+With this trigger, don't make `claude-review` a required check. Every label added starts a run,
+and for any label but `claude-review` the `if:` skips the job, which GitHub counts as passed. That
+run is then the commit's latest `claude-review` check, so adding any label while a review is
+running, or after one failed, passes the check without a review. A repository that requires the
+check should set `review-dependabot: true` instead, with the secrets under *Dependabot*.
+
 A Dependabot pull request that someone else has pushed to is reviewed as usual: the skip only
 applies while every commit is Dependabot's own, signed by GitHub.
 
