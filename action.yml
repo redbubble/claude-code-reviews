@@ -312,7 +312,7 @@ runs:
     # tokens. The gh on PATH is bin/gh, which keeps gh pr and gh issue to this repository.
     - id: review
       if: steps.scope.outputs.run == 'true'
-      uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+      uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
       # For gh-read. Not GH_TOKEN: the action sets that to github_token for posting the review.
       # ATLASSIAN_READ_TOKEN is for atlassian-read. REVIEW_PR is the only pull request
       # gh-review-threads acts on.
