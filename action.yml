@@ -221,14 +221,14 @@ runs:
     # client ID (not secret), which create-github-app-token prefers to the deprecated app ID.
     - id: rb-token
       if: steps.scope.outputs.run == 'true'
-      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
       with:
         client-id: Iv23lituGw4b66z7qu3p
         private-key: ${{ inputs.app-private-key }}
         owner: redbubble
     - id: tp-token
       if: steps.scope.outputs.run == 'true'
-      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
       with:
         client-id: Iv23lituGw4b66z7qu3p
         private-key: ${{ inputs.app-private-key }}
@@ -312,7 +312,7 @@ runs:
     # tokens. The gh on PATH is bin/gh, which keeps gh pr and gh issue to this repository.
     - id: review
       if: steps.scope.outputs.run == 'true'
-      uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+      uses: anthropics/claude-code-action@acfe7992852970efb4fee683d63d628e3e52df67 # v1.0.286
       # For gh-read. Not GH_TOKEN: the action sets that to github_token for posting the review.
       # ATLASSIAN_READ_TOKEN is for atlassian-read. REVIEW_PR is the only pull request
       # gh-review-threads acts on.
