@@ -80,6 +80,29 @@ review fails unless it's a single model ID with no spaces or quotes. Otherwise i
 such as a wider `--allowedTools`. A model ID that doesn't exist also fails the review rather than
 falling back to the default.
 
+## Choosing the effort
+
+By default the review runs at the Claude Code CLI's default effort. To change it, add `effort`
+with `low`, `medium`, `high`, `xhigh` or `max`:
+
+```yaml
+        with:
+          # ...the inputs as in the README's Usage
+          effort: high
+```
+
+Any other value fails the review. A repository can pick the effort per pull request, for example
+a second label that asks for `high`, by setting `effort` from the label in its workflow:
+
+```yaml
+    if: contains(fromJSON('["claude-review", "claude-review-deep"]'), github.event.label.name)
+    # ...
+        with:
+          effort: ${{ github.event.label.name == 'claude-review-deep' && 'high' || '' }}
+```
+
+A higher effort costs more per review: check the cost line at the end of the review comment.
+
 ## Limiting the findings
 
 A review posts at most 5 new findings, of every severity together. Important findings come

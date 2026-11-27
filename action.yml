@@ -31,6 +31,12 @@ inputs:
     description: The model that reviews. A single model ID.
     required: false
     default: claude-opus-5-5
+  effort:
+    description: >-
+      How much effort the model puts into the review: low, medium, high, xhigh or max. Without it,
+      the Claude Code CLI's default applies.
+    required: false
+    default: ''
   max-findings:
     description: >-
       The most new findings a review posts, of every severity, Important included. Without it,
@@ -289,16 +295,22 @@ runs:
         echo "token=$token" >> "$GITHUB_OUTPUT"
 
     # The model goes into claude_args, which the action splits shell-style, so a value with spaces
-    # would add flags such as --allowedTools. Allow a single model ID only. max-findings goes into
-    # the prompt, so allow a number only.
+    # would add flags such as --allowedTools. Allow a single model ID only. effort goes into
+    # claude_args too, so allow one of the CLI's levels only. max-findings goes into the prompt, so
+    # allow a number only.
     - if: steps.scope.outputs.run == 'true'
       shell: bash
       env:
         MODEL: ${{ inputs.model }}
+        EFFORT: ${{ inputs.effort }}
         MAX_FINDINGS: ${{ inputs.max-findings }}
       run: |
         re='^[A-Za-z0-9][][A-Za-z0-9._:/@-]*$'
         [[ $MODEL =~ $re ]] || { echo "::error::model isn't a single model ID"; exit 1; }
+        if [ -n "$EFFORT" ] && ! [[ $EFFORT =~ ^(low|medium|high|xhigh|max)$ ]]; then
+          echo "::error::effort isn't one of low, medium, high, xhigh or max"
+          exit 1
+        fi
         if [ -n "$MAX_FINDINGS" ] && ! [[ $MAX_FINDINGS =~ ^[1-9][0-9]{0,2}$ ]]; then
           echo "::error::max-findings isn't a number from 1 to 999"
           exit 1
@@ -342,6 +354,7 @@ runs:
           your PATH. `.claude-code-reviews/` is not part of this pull request: don't review it.
         claude_args: |
           --model ${{ inputs.model }}
+          ${{ inputs.effort != '' && format('--effort {0}', inputs.effort) || '' }}
           --permission-mode default
           --allowedTools 'Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh-review-threads:*),Bash(gh-read:*),Bash(atlassian-read:*),Bash(git ls-files:*)'
           --disallowedTools 'Edit,MultiEdit,Write,NotebookEdit,Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(*git-push.sh:*),Read(//proc/**)'
